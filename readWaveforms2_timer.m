@@ -92,7 +92,6 @@ function freadTimer(src,~)
                     try
                         updateString = get(Handles.channel,'string');
                         updateString{get(Handles.channel,'userdata')==u.chan} = repmat('-',1,ceil(10.*(I+i)./spikeCount)); % ACS - progress bar is for each file, could make it across all files
-                        
                         set(Handles.channel, 'string', updateString);
                         drawnow;
                         switch ME.identifier

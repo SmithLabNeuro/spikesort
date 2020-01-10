@@ -1,0 +1,13 @@
+Read  files: (GUI open)
+spikesort({'path/animal_date_task_0002.nev','path/animal_date_task_0001.nev'},’noSort’, true,’doSparse’,10000,’doTimer’, true);
+
+Read files: (No GUI) 
+* order: MoG > Nasnet > readOnly
+
+spikesort(filepath,’readOnly’,true,’readOnlyChannel’,1:10)
+spikesort(filepath,’readOnlyWithNasnet’,true,’readOnlyChannel’,1:10,’gamma’,0.2,’net’, 'UberNet_N50_L1_', ‘sortCode’, [ 255 0])
+spikesort(filepath,’readOnlyWithMoG’,true,’readOnlyChannel’,1:10, ’gamma’,0.2,’net’, 'UberNet_N50_L1_', ‘sortCode’, [ 255 0])
+
+Write files: (GUI open + write the newest?)
+spikesort(filepath,’writeOnly’,true)
+

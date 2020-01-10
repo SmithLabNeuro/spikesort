@@ -33,11 +33,9 @@ else
     nSpikesToRead = 0;
 end
 
-
 if nargin<2,verbose='on';end 
 if nargin<3,doTimer=true;end
-waitMsg = 'Please wait, reading sample waveforms';
-w = waitbar(0,waitMsg,'visible',verbose);
+
 
 for j = 1:numel(ch)
     if ishandle(Handles.channel)&&(find(get(Handles.channel,'userdata')==ch(j))==1||~doTimer) 
@@ -80,22 +78,27 @@ for j = 1:numel(ch)
             
             Times = [Times; newTimes];
             Unit = [Unit; uni];
-            waitbar((j-1)/length(ch)+(i/length(FileInfo))/length(ch),w,waitMsg,'visible',verbose);
             
             FileInfo(i).units{ch(j)} = zeros(256,1);
             FileInfo(i).units{ch(j)}(unique(double(Unit))+1) = 1;
         end
-        
-        save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Waveforms','Times','Unit','Breaks','Sparse','nSpikesToRead');
+        if exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'file') == 2
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Waveforms','Times','Unit','Breaks','Sparse','nSpikesToRead','-append');
+        else
+            ComponentLoadings = [];
+            me = [];
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Waveforms','Times','Unit','Breaks','Sparse','nSpikesToRead','ComponentLoadings','me');
+        end
         updateString = get(Handles.channel,'string');
         switch Sparse
             case 1
-                updateString{(ActiveChannelList==ch)} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{(ActiveChannelList==ch)} '</FONT></HTML>'];
+                updateString{(ActiveChannelList==ch(j))} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{(ActiveChannelList==ch)} '</FONT></HTML>'];
             case 2
-                updateString{(ActiveChannelList==ch)} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{(ActiveChannelList==ch)} '</FONT></HTML>'];
+                updateString{(ActiveChannelList==ch(j))} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{(ActiveChannelList==ch)} '</FONT></HTML>'];
         end
+        set(Handles.channel,'value',find(ActiveChannelList==ch(j)));
         set(Handles.channel,'string',updateString);
-        
+   
         spikesort_gui('load');
     elseif ishandle(Handles.mainFigure) %i.e., it hasn't been closed yet...
         if Sparse == 2
@@ -103,12 +106,12 @@ for j = 1:numel(ch)
         else
             readWaveforms2_timer(ch(j));
         end
+        save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Sparse','nSpikesToRead','-append');
         if j==1
             spikesort_gui('load');
         end
-        
     end
 end
 set(Handles.readSize,'enable','off');
 
-close(w);
+

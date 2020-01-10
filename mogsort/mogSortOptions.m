@@ -8,9 +8,10 @@ options = struct();
 
 %% Default options
 % artifactDetector
-options.voltageThreshold = int16(1000); % ThreshDetect - set to Inf to disable
-options.varianceMax = 1e03;          % varDetect - set to Inf to disable
-options.freqThreshold = 2000;   %FreqDetect - set to Inf to disable
+options.voltageThreshold = Inf; % ThreshDetect - set to Inf to disable int16(1000)
+options.varianceMax = Inf;          % varDetect - set to Inf to disable  1e03
+options.freqThreshold = Inf;   %FreqDetect - set to Inf to disable  2000
+options.noiseCorrThreshold = 0.5;
 
 % iterativePCA
 options.numPcaDimensionsToUse = 5; %used in a lot of stuff (iterativePca, getting prior Model)
@@ -28,6 +29,7 @@ options.numFolds = 30; %number of folds (using monte carlo cross validation)
 options.holdoutProportion = 0.5; %size of partition 
 options.guessClusters = false;% guess clusters % false - default clusters | true - evalCluster
 options.maxRetry = 5;
+options.prior = [1 1 0.95 0.93 0.91];
 
 % options.extraClusterMu = 0.05; %Mu to use when adding an extra gaussian model to cluster over
 % options.extraClusterSigma = 0.01; %Sigma to use when adding extra gaussian model to cluster over

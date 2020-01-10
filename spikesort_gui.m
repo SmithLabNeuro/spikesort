@@ -8,11 +8,7 @@ global guiVals;
 
 ChannelString = Handles.ChannelString;
 
-if (strcmp(operation,'load') == 0)
-    if WaveformInfo.ChannelNumber == 0
-        return
-    end
-elseif ~ishandle(Handles.mainFigure)
+if ~ishandle(Handles.mainFigure)
     return
 end
 
@@ -136,39 +132,21 @@ switch(operation) %alphabetize the cases some time...
         ChannelInfo = get(Handles.channel,'UserData');
         channelIndex = get(Handles.channel,'Value');
         ChannelNumber = ChannelInfo(channelIndex);
-        %         load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)));
         if  strcmp(get(gcf,'selectiontype'),'open')
             if ~cachedList(channelIndex)
                 msg = sprintf('Loading channel %i ...',ChannelNumber);
-                set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));
+                set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
                 readSampleWaveforms(ChannelNumber,'off',ssDat.doTimer,ssDat.doSparse);
-                load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'Sparse');
-                updateString = get(Handles.channel,'string');
-                switch Sparse
-                    case 1
-                        updateString{channelIndex} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{channelIndex} '</FONT></HTML>'];
-                    case 2
-                        updateString{channelIndex} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{channelIndex} '</FONT></HTML>'];
-                end
-                set(Handles.channel,'string',updateString);
                 fprintf('Channel %i has just been loaded\n',ChannelNumber);
-                set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
+                set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
             elseif cachedList(channelIndex)
                 load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'Sparse');
                 if Sparse == 2 && ssDat.doSparse == false
                     msg = sprintf('Reloading channel %i ...',ChannelNumber);
-                    set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));
+                    set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
                     readSampleWaveforms(ChannelNumber,'off',ssDat.doTimer,ssDat.doSparse);
-                    updateString = get(Handles.channel,'string');
-                    switch Sparse
-                        case 1
-                            updateString{channelIndex} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{channelIndex} '</FONT></HTML>'];
-                        case 2
-                            updateString{channelIndex} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{channelIndex} '</FONT></HTML>'];
-                    end
-                    set(Handles.channel,'string',updateString);
                     fprintf('Channel %i has been loaded again\n',ChannelNumber);
-                    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
+                    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
                 end
             end
             set(gcf,'selectiontype','normal');
@@ -180,7 +158,11 @@ switch(operation) %alphabetize the cases some time...
                 %Figure out what the unit codes were in the original file (then we
                 %will add/remove unit codes when we call performHistory
                 possibleUnits = [];
-                for i = find(cellfun(@ismember,repmat({ChannelNumber},size(FileInfo)),{FileInfo.ActiveChannels})) 
+                for j = 1:length(FileInfo)
+                    FileInfo(j).units{1,WaveformInfo.ChannelNumber} = zeros(256,1);
+                    FileInfo(j).units{1,WaveformInfo.ChannelNumber}(unique(double(WaveformInfo.Unit))+1) = 1;
+                end
+                for i = find(cellfun(@ismember,repmat({ChannelNumber},size(FileInfo)),{FileInfo.ActiveChannels}))
                     possibleUnits = unique([possibleUnits(:); ...
                         find(FileInfo(i).units{ChannelNumber})-1]); 
                 end
@@ -199,7 +181,7 @@ switch(operation) %alphabetize the cases some time...
                         set(Handles.history,'String',String);
                         set(Handles.history,'Value',Value);
                         
-                        performHistory(UserData);
+                        performHistory(UserData,[]);
                     else
                         set(Handles.history,'Value',0);
                         set(Handles.history,'UserData',[]);
@@ -221,7 +203,6 @@ switch(operation) %alphabetize the cases some time...
                         end
                         manageTempFiles;
                 end
-                
                 
             else
                 Handles.history.String = [];
@@ -260,6 +241,16 @@ switch(operation) %alphabetize the cases some time...
                     delete(lineObjects);
                 end
             end
+            if exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'file') == 2
+                load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'bestModel');
+                if ~isnan(bestModel)
+                    set(findobj(gcf,'tag','adjustSort'),'enable','on');
+                else
+                    set(findobj(gcf,'tag','adjustSort'),'enable','off');
+                end
+            else
+                set(findobj(gcf,'tag','adjustSort'),'enable','off');
+            end
         end
     case 'setMax'
         [~, maxY, ~] = ginput(1);
@@ -279,6 +270,10 @@ switch(operation) %alphabetize the cases some time...
         mogSort();
         drawSpikes();
         spikesort_gui load;
+    case 'mogsort_adjust'
+        mogSort_adjust();
+        drawSpikes;
+        spikesort_gui load;
     case 'clear_history'
         set(Handles.history,'Value',0);
         set(Handles.history,'UserData',[]);
@@ -292,14 +287,18 @@ switch(operation) %alphabetize the cases some time...
         Value = 0;
         UserData = [];
         String = [];
+        bestModel = nan;
+        m = [];
+        gamma = nan;
+        nClusters = nan;
         if exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits')),'file') == 7
-            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(get(Handles.channel,'Value')))),'UserData','Value','String','-append');
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(get(Handles.channel,'Value')))),'UserData','Value','String','bestModel','gamma','m','nClusters','-append');
         end
-        spikesort_gui load;
         for i = 1:length(FileInfo)
             FileInfo(i).units{1,WaveformInfo.ChannelNumber} = zeros(256,1);
             FileInfo(i).units{1,WaveformInfo.ChannelNumber}(unique(double(WaveformInfo.Unit))+1) = 1;
         end
+        
         spikesort_gui load;
     case 'sample'
         WaveformInfo.display = [];
@@ -436,7 +435,7 @@ switch(operation) %alphabetize the cases some time...
             UserData = get(Handles.history,'UserData');
             
             loadWaveforms(WaveformInfo.ChannelNumber);
-            performHistory(UserData(1:WaveformInfo.historyValue,:));
+            performHistory(UserData(1:WaveformInfo.historyValue,:),[]);
             WaveformInfo.historyValue = -1;
             
             drawSpikes();
@@ -445,28 +444,22 @@ switch(operation) %alphabetize the cases some time...
             
         end
     case 'write'
-        button = questdlg('Are you sure?',...
-            'Write all files','Yes','Yes(and save sort)','No','No');
+        if ssDat.writeOnly
+            button = 'Yes';
+        else
+            button = questdlg('Are you sure?',...
+                'Write all files','Yes','No','No');
+        end
         
-        %%% Initialize spikeSortModel struct 
+        %%% Initialize spikeSortModel struct
         %spikeSortModel = struct();
         %spikeSortModel(1).allSnr = [];
         
-        if strcmp(button,'Yes') || strcmp(button,'Yes(and save sort)')
-            if strcmp(button,'Yes(and save sort)')
-                [~,filename,~]=fileparts(FileInfo(1).filename);
-                dftname = strcat('savedSort_',filename);
-                filter = [WaveformInfo.sortFileLocation,filesep,'*.mat'];
-                titlename = 'Save Sort';
-                [file,path] = uiputfile(filter,titlename,dftname);
-                if file == 0
-                    return;
-                end
-                fname = strcat(path,file);
-                saveSort(-1,fname);
-            end
-            spikesort_gui load
-            
+        if strcmp(button,'Yes')
+            [~,filename,~]=fileparts(FileInfo(1).filename);
+            [~,tempfile,~] = fileparts(tempname);
+            dftname = fullfile(WaveformInfo.sortFileLocation,strcat('savedSort_',filename,'_',tempfile(1:10)));
+            saveSort(0,dftname);            
             ud = get(Handles.channel,'UserData');
             
             changedChannels = [];
@@ -482,12 +475,13 @@ switch(operation) %alphabetize the cases some time...
             end
             warning('off','MATLAB:hg:uicontrol:ListboxTopMustBeWithinStringRange'); %turn off this warning so that it doesn't blow up the command window
             
-            set(Handles.notifications,'String','Writing files ...',guiVals.noteString,guiVals.noteVals(1,:));
-            
+            set(Handles.notifications,'String','Writing files ...',guiVals.noteString,guiVals.noteVals(1,:));drawnow;
+            set(findobj(Handles.mainWindow,'tag','enableOnLoad'),'enable','off');
             for i = 1:length(changedChannels)
                 set(Handles.channel,'Value',find(ud == changedChannels(i)));
+                spikesort_gui load
                 possibleUnits = [];
-                for j = find(cellfun(@ismember,repmat({changedChannels(i)},size(FileInfo)),{FileInfo.ActiveChannels})) 
+                for j = find(cellfun(@ismember,repmat({changedChannels(i)},size(FileInfo)),{FileInfo.ActiveChannels}))
                     possibleUnits = unique([possibleUnits(:); ...
                         find(FileInfo(j).units{changedChannels(i)})-1]);
                 end
@@ -498,9 +492,10 @@ switch(operation) %alphabetize the cases some time...
                 Unit = [];
                 Times = [];
                 Waveforms = [];
-                for k = find(cellfun(@ismember,repmat({changedChannels(i)},size(FileInfo)),{FileInfo.ActiveChannels})) 
+                set(Handles.notifications,'String',sprintf('Writing files. Channel %d.',changedChannels(i)),guiVals.noteString,guiVals.noteVals(1,:));drawnow;
+                for k = find(cellfun(@ismember,repmat({changedChannels(i)},size(FileInfo)),{FileInfo.ActiveChannels}))
                     
-                    load(histFile); 
+                    load(histFile);
                     getWaveforms(changedChannels(i),k); % re-read everything from the NEV before writing
                     unitmap = WaveformInfo.possibleUnits;
                     
@@ -512,42 +507,13 @@ switch(operation) %alphabetize the cases some time...
                     set(Handles.history,'UserData',UserData);
                     set(Handles.history,'String',String);
                     
-                    if true 
-                        pcaSteps = find(ismember(UserData(:,1),{'pca'}));
-                        if any(pcaSteps)
-                            centeredWaves = bsxfun(@minus,double(WaveformInfo.Waveforms),origSampleMeans); 
-                            components = centeredWaves*WaveformInfo.ComponentLoadings; 
-                            components = mat2cell(components,size(components,1),ones(size(components,2),1));
-                            for step = 1:numel(pcaSteps)
-                                origScatterPoints = UserData{pcaSteps(step),2}{1};
-                                compsToPlot = [];
-                                try
-                                    [~,compsToPlot(1)] = max(cellfun(@sum,cellfun(@ismember,repmat({origScatterPoints(:,1)},size(components)),components,'uni',0)));
-                                    [~,compsToPlot(2)] = max(cellfun(@sum,cellfun(@ismember,repmat({origScatterPoints(:,2)},size(components)),components,'uni',0)));
-                                    newScatterPoints = cell2mat(components(compsToPlot));
-                                catch %#ok<CTCH>
-                                    error('spikesort_sparse:badComps:Argh','Cannot match re-read waves to components used for sorting'); 
-                                end
-                                UserData{pcaSteps(step),2}{1} = newScatterPoints; %#ok<AGROW> 
-                            end
-                        end
-                    end
-                    
-                    performHistory(UserData);
+                    performHistory(UserData,k);
                     
                     Unit = vertcat(Unit,WaveformInfo.Unit); %#ok<AGROW>
                     Times = vertcat(Times,WaveformInfo.Times); %#ok<AGROW>
                     Waveforms = vertcat(Waveforms,WaveformInfo.Waveforms); %#ok<AGROW>
                     spikesort_write2(k);
-                    
-                    set(Handles.notifications,'String',sprintf('Writing files. Channel %d.',changedChannels(i)),guiVals.noteString,guiVals.noteVals(1,:));
-                    
                 end
-                Sparse = 1;
-                nSpikesToRead = 0;
-                save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',changedChannels(i))),'Waveforms','Unit','Times','Sparse','nSpikesToRead','-append'); %update the ch file with the new (written) sort codes. (saves having to reread) -ACS 29Oct2014
-
-                loadWaveforms(changedChannels(i));
                 
                 loc = find(WaveformInfo.ChannelNumber == get(Handles.channel,'UserData'));
                 
@@ -561,13 +527,16 @@ switch(operation) %alphabetize the cases some time...
                 UserData = [];
                 Value = 0;
                 
-                save(histFile,'UserData','String','Value','filenames');
+                set(Handles.history,'Value',0);
+                set(Handles.history,'UserData',[]);
+                set(Handles.history,'String',[]);
+                
+                save(histFile,'UserData','String','Value','filenames','-append');
+                chFile = fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',changedChannels(i))); 
+                save(chFile,'Unit','Times','Waveforms','-append');
+                loadWaveforms(changedChannels(i));
             end
-            set(Handles.notifications,'String','Writing Complete!',guiVals.noteString,guiVals.noteVals(2,:));
-            
-            set(Handles.history,'Value',0);
-            set(Handles.history,'UserData',[]);
-            set(Handles.history,'String',[]);
+            set(Handles.notifications,'String','Writing Complete!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
             
             set(Handles.channel,'Value',1);
             
@@ -576,7 +545,11 @@ switch(operation) %alphabetize the cases some time...
             end %mark the file as written
             
             % delete related tempsort
-            currentNevSet = {FileInfo.filename};
+            currentNevSet = {};
+            for i = 1:length(FileInfo)
+                [~,name,ext] = fileparts(FileInfo(i).filename);
+                currentNevSet{i} = [name,ext];
+            end
             d = dir([WaveformInfo.sortFileLocation,filesep,'tempsort*']);
             if ~isempty(d)
                 tempSortFiles = {d.name};
@@ -591,7 +564,7 @@ switch(operation) %alphabetize the cases some time...
                     delete(tempSort{:});
                 end
             end
-            
+            set(findobj(Handles.mainWindow,'tag','enableOnLoad'),'enable','on');
             spikesort_gui load
         end
 end
@@ -599,7 +572,7 @@ end
 UserData = get(Handles.history,'UserData');
 Value = get(Handles.history,'Value');
 String = get(Handles.history,'String');
-if exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits')),'file') == 7
+if exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(get(Handles.channel,'Value')))),'file') == 2
     save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(get(Handles.channel,'Value')))),'UserData','Value','String','-append');
 end
 
@@ -704,38 +677,24 @@ catch
     end
 end
 
-set(Handles.notifications,'String','Start loading channels ...',guiVals.noteString,guiVals.noteVals(1,:));
+set(Handles.notifications,'String','Start loading channels ...',guiVals.noteString,guiVals.noteVals(1,:));drawnow;
 for j = ch
     if ismember(j,ActiveChannelList(~cachedList))
+        set(Handles.channel,'Value',find(ActiveChannelList==j));
         msg = sprintf('Loading channel %i ...',j);
-        set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));
+        set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
         readSampleWaveforms(j,'off',ssDat.doTimer,ssDat.doSparse);
         load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',j)),'Sparse');
-        updateString = get(Handles.channel,'string');
-        switch Sparse
-            case 1
-                updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-            case 2
-                updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-        end
-        set(Handles.channel,'string',updateString);
         dispMsg = sprintf('Channel %i has just been loaded',j);
     elseif ismember(j,ActiveChannelList(cachedList))
+        set(Handles.channel,'Value',find(ActiveChannelList==j));
         load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',j)),'Sparse');
         if Sparse == 2 && ssDat.doSparse == false
             msg = sprintf('Reloading channel %i ...',j);
-            set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));
+            set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
             readSampleWaveforms(j,'off',ssDat.doTimer,ssDat.doSparse);
-            updateString = get(Handles.channel,'string');
-            switch Sparse
-                case 1
-                    updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-                case 2
-                    updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-            end
-            set(Handles.channel,'string',updateString);
             fprintf('Channel %i has been loaded again\n',j);
-            set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
+            set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
             dispMsg = sprintf('Channel %i has been loaded again',j);
         else
             dispMsg = sprintf('Channel %i has already been loaded',j);
@@ -748,7 +707,7 @@ for j = ch
 end
 disp('Loading finished!');
 spikesort_gui('load');
-set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
+set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
 
 function selectSpikes(point1, point2, status)
 global Handles;
@@ -840,7 +799,7 @@ end
 
 WaveformInfo.Unit(WaveformInfo.selected) = newCode;
 
-function performHistory(history)
+function performHistory(history,fileIndex)
 global Handles;
 global WaveformInfo;
 
@@ -867,9 +826,11 @@ for i = 1:size(history,1)
         case 'deselect'
             deselectAll;
         case 'netsort'
-            sortRecover;
+            sortRecover(fileIndex);
         case 'mogsort'
-            sortRecover;
+            sortRecover(fileIndex);
+        case 'mogsort_adjust'
+            sortRecover(fileIndex);
     end
 end
 
@@ -924,7 +885,7 @@ for i=1:length(p)
     end
 end
 
-function getWaveforms(ChannelNumber, fileIndex)
+function getWaveforms(ChannelNumber,fileIndex)
 global Handles;
 global WaveformInfo;
 global FileInfo;
@@ -938,7 +899,7 @@ WaveformInfo.Waveforms = [];
 WaveformInfo.Unit = [];
 WaveformInfo.Times = [];
 
-load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'Breaks','Unit');
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'Breaks');
 WaveformInfo.Breaks = Breaks;
 
 loc = FileInfo(fileIndex).HeaderSize + FileInfo(fileIndex).Locations(PacketNumbers);
@@ -953,7 +914,19 @@ WaveformInfo.Unit = uni;
 WaveformInfo.WaveformsAsShown = WaveformInfo.Waveforms;
 WaveformInfo.Align = zeros(size(WaveformInfo.Waveforms,1),1);
 WaveformInfo.selected = [];
-[WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms)); 
+% [WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms)); 
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'ComponentLoadings','me');
+
+if isempty(ComponentLoadings)
+    [WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms));
+    ComponentLoadings = WaveformInfo.ComponentLoadings;
+    me = mean(WaveformInfo.Waveforms);
+    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'ComponentLoadings','me','-append');
+else
+    centeredWaves = bsxfun(@minus,double(WaveformInfo.Waveforms),me);
+    WaveformInfo.ComponentLoadings = ComponentLoadings;
+    WaveformInfo.Comp = centeredWaves*WaveformInfo.ComponentLoadings;
+end
 resetWaveformBounds();
 
 function loadWaveforms(ChannelNumber)
@@ -974,7 +947,18 @@ WaveformInfo.WaveformsAsShown = WaveformInfo.Waveforms;
 WaveformInfo.Align = zeros(size(WaveformInfo.Waveforms,1),1);
 WaveformInfo.selected = [];
 
-[WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms)); 
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'ComponentLoadings','me');
+
+if isempty(ComponentLoadings) || Sparse == 1
+    [WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms));
+    ComponentLoadings = WaveformInfo.ComponentLoadings;
+    me = mean(WaveformInfo.Waveforms);
+    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'ComponentLoadings','me','-append');
+else
+    centeredWaves = bsxfun(@minus,double(WaveformInfo.Waveforms),me);
+    WaveformInfo.ComponentLoadings = ComponentLoadings;
+    WaveformInfo.Comp = centeredWaves*WaveformInfo.ComponentLoadings;
+end
 
 resetWaveformBounds();
 
@@ -1230,9 +1214,11 @@ else
         
         text(x,y,num2str(snr),'parent',isiHandles(i));
     end
-    g =length(get(Handles.sortCodes,'String'));
-    if g <= 5
-        for i = g:5
+
+    g = max(WaveformInfo.Unit(WaveformInfo.Unit<255));
+    
+    if g < 4
+        for i = g+2:5
             cla(isiHandles(i));
             set(isiHandles(i),'YTickLabel',[]);
         end
@@ -1393,13 +1379,20 @@ global Handles
 switch get(ancestor(src,'figure'),'selectiontype')
     case 'normal' %left click
         try
+            %             axesList = findobj(gcf,'type','axes');
+            %             [polygonPoints(:,1),polygonPoints(:,2)] = getline(src,'closed');
+            %             scatterPoints = get(gca,'userdata');
+            %             selectPca(scatterPoints,polygonPoints);
+            %             set(Handles.history,'String',[get(Handles.history,'String'); {'Select spikes in PCA space'}]);
+            %             set(Handles.history,'Value',length(get(Handles.history,'String')));
+            %             set(Handles.history,'UserData',[get(Handles.history,'UserData'); {'pca',{scatterPoints,polygonPoints,get(Handles.showPca,'userdata');}}]);
             axesList = findobj(gcf,'type','axes');
             [polygonPoints(:,1),polygonPoints(:,2)] = getline(src,'closed');
-            scatterPoints = get(gca,'userdata');
-            selectPca(scatterPoints,polygonPoints);
+            compsToPlot = get(Handles.showPca,'userdata');
+            selectPca(polygonPoints,compsToPlot);
             set(Handles.history,'String',[get(Handles.history,'String'); {'Select spikes in PCA space'}]);
             set(Handles.history,'Value',length(get(Handles.history,'String')));
-            set(Handles.history,'UserData',[get(Handles.history,'UserData'); {'pca',{scatterPoints,polygonPoints}}]);
+            set(Handles.history,'UserData',[get(Handles.history,'UserData'); {'pca',{polygonPoints,compsToPlot}}]);
         catch ME
             switch ME.identifier
                 case 'images:getline:interruptedMouseSelection'
@@ -1421,11 +1414,21 @@ end
 drawSpikes();
 drawRasters();
 
-function selectPca(scatterPoints,polygonPoints)
+% function selectPca(scatterPoints,polygonPoints)
+% global Handles WaveformInfo
+% sortCodeArray = cellfun(@str2doubleParen,get(Handles.sortCodes,'String'));
+% p = find(ismember(WaveformInfo.Unit,sortCodeArray(WaveformInfo.sortCodes)));
+% within = inpolygon(scatterPoints(:,1),scatterPoints(:,2),polygonPoints(:,1),polygonPoints(:,2));
+% within = intersect(p,find(within));
+% WaveformInfo.selected = within;
+% WaveformInfo.selected = intersect(WaveformInfo.selected,find(WaveformInfo.restrictedSet));
+
+
+function selectPca(polygonPoints,compsToPlot)
 global Handles WaveformInfo
 sortCodeArray = cellfun(@str2doubleParen,get(Handles.sortCodes,'String'));
 p = find(ismember(WaveformInfo.Unit,sortCodeArray(WaveformInfo.sortCodes)));
-within = inpolygon(scatterPoints(:,1),scatterPoints(:,2),polygonPoints(:,1),polygonPoints(:,2));
+within = inpolygon(WaveformInfo.Comp(:,compsToPlot(1)),WaveformInfo.Comp(:,compsToPlot(2)),polygonPoints(:,1),polygonPoints(:,2));
 within = intersect(p,find(within));
 WaveformInfo.selected = within;
 WaveformInfo.selected = intersect(WaveformInfo.selected,find(WaveformInfo.restrictedSet));
@@ -1434,21 +1437,41 @@ function deselectAll
 global WaveformInfo
 WaveformInfo.selected = [];
 
-function sortRecover
+function sortRecover(fileIndex)
 global Handles
 global WaveformInfo
 global FileInfo
+
 chanList = get(Handles.channel,'UserData');
-load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanList(get(Handles.channel,'Value')))),'sortcodes');
-WaveformInfo.Unit = sortcodes;
-possibleUnits = unique(sortcodes);
+chanNum = chanList(get(Handles.channel,'Value'));
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanNum)),'sortcodes');
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',chanNum)),'Sparse');
+if Sparse == 2
+    readSampleWaveforms(chanNum,'off',false,false);
+end
 
-WaveformInfo.possibleUnits = [{255} {0} num2cell(setdiff(possibleUnits',[0 255]))];
-unitmap = WaveformInfo.possibleUnits;
+if isempty(fileIndex)
+    WaveformInfo.Unit = sortcodes;
+    possibleUnits = unique(WaveformInfo.Unit);
+    
+    WaveformInfo.possibleUnits = [{255} {0} num2cell(setdiff(possibleUnits',[0 255]))];
+    unitmap = WaveformInfo.possibleUnits;
+    
+    set(Handles.sortCodes,'String',unitmap,'Value',2:length(unitmap));
+    unitmap{end+1} = 'new';
+    set(Handles.toMove,'String',unitmap);
+else
+    for i = 1:length(FileInfo)
+        spikeCount(i) = sum(FileInfo(i).PacketOrder == chanList(get(Handles.channel,'Value')));
+    end
+    if fileIndex == 1
+        WaveformInfo.Unit = sortcodes(1:spikeCount(fileIndex));
+    else
+        WaveformInfo.Unit = sortcodes(sum(spikeCount(1:fileIndex-1))+1:sum(spikeCount(1:fileIndex-1))+spikeCount(fileIndex));
+    end
+end
 
-set(Handles.sortCodes,'String',unitmap,'Value',2:length(unitmap));
-unitmap{end+1} = 'new';
-set(Handles.toMove,'String',unitmap);
+
 
 WaveformInfo.sortCodes = get(Handles.sortCodes,'Value');
 for i = 1:length(FileInfo)
@@ -1502,21 +1525,21 @@ for i = ch
             load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
             try
                 if isfield(WaveformInfo,'NeuralNet')
-                    Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc,'net',WaveformInfo.NeuralNet);
+                    Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc,'net',WaveformInfo.NeuralNet);
                 else
-                    Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc);
+                    Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc);
                 end
             catch ME
-                fprintf('Channel %i can not be sorted\n',i);
+                fprintf('Channel %i can not be sorted by neural net sort\n',i);
                 warndlg(ME.message,'Warning');
-                set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                return;
+                set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                continue;
             end
             WaveformInfo.Unit = Unit;
             sortcodes = WaveformInfo.Unit;
-            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-            fprintf('Channel %i has been loaded and sorted\n',i);
-            set(Handles.notifications,'String','Load and neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');
+            fprintf('Channel %i has been loaded and sorted by neural net sort\n',i);
+            set(Handles.notifications,'String','Load and neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
         elseif ismember(i,ActiveChannelList(cachedList))
             load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Sparse');
             switch Sparse
@@ -1526,21 +1549,21 @@ for i = ch
                     load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
                     try
                         if isfield(WaveformInfo,'NeuralNet')
-                            Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc,'net',WaveformInfo.NeuralNet);
+                            Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc,'net',WaveformInfo.NeuralNet);
                         else
-                            Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc);
+                            Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc);
                         end
                     catch ME
-                        fprintf('Channel %i can not be sorted\n',i);
+                        fprintf('Channel %i can not be sorted by neural net sort\n',i);
                         warndlg(ME.message,'Warning');
-                        set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                        return;
+                        set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                        continue;
                     end
                     WaveformInfo.Unit = Unit;
                     sortcodes = WaveformInfo.Unit;
-                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-                    fprintf('Channel %i has been sorted\n',i);
-                    set(Handles.notifications,'String','Neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');                
+                    fprintf('Channel %i has been sorted by neural net sort\n',i);
+                    set(Handles.notifications,'String','Neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
                 case 2
                     msg = sprintf('Reload and sorting channel %i ...',i);
                     set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
@@ -1551,21 +1574,21 @@ for i = ch
                     load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
                     try
                         if isfield(WaveformInfo,'NeuralNet')
-                            Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc,'net',WaveformInfo.NeuralNet);
+                            Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc,'net',WaveformInfo.NeuralNet);
                         else
-                            Unit = nasnet(Waveforms','gm',gamma,'sortCode',sc);
+                            Unit = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sc);
                         end
                     catch ME
-                        fprintf('Channel %i can not be sorted\n',i);
+                        fprintf('Channel %i can not be sorted by neural net sort\n',i);
                         warndlg(ME.message,'Warning');
-                        set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                        return;
+                        set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                        continue;
                     end
                     WaveformInfo.Unit = Unit;
                     sortcodes = WaveformInfo.Unit;
-                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-                    fprintf('Channel %i has been reloaded and sorted\n',i);
-                    set(Handles.notifications,'String','Reload and neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');
+                    fprintf('Channel %i has been reloaded and sorted by neural net sort\n',i);
+                    set(Handles.notifications,'String','Reload and neural net sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
             end
         end
         
@@ -1604,7 +1627,7 @@ cachedList = false(size(ActiveChannelList));
 for i = 1:size(ActiveChannelList,1)
     cachedList(i) = exist(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ActiveChannelList(i))),'file');
 end
-[ch,scignore] = mogsortOption();
+[ch,gamma] = mogsortOption();
 if isempty(ch)
     return;
 end
@@ -1619,48 +1642,36 @@ for i = ch
             updateString = get(Handles.channel,'string');
             updateString{ActiveChannelList==i} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{ActiveChannelList==i} '</FONT></HTML>'];
             set(Handles.channel,'string',updateString);
-            load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
-            try
-                mogopt = mogSortOptions;
-                mogopt.sortcodeToIgnore = scignore;
-                mogopt.WaveformInfoUnits = WaveformInfo.Unit;
-                Unit = mogSorter(Waveforms',mogopt);
-                assert(~isempty(Unit),sprintf('Error:Channel %i can not been sorted\n',i));
-            catch ME
-                fprintf('Channel %i can not be sorted\n',i);
-                warndlg(ME.message,'Warning');
-                set(Handles.notifications,'String','MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                return;
+            load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms');
+            [Unit] = Nas_Mog(i,Waveforms',gamma);
+            if isempty(Unit)
+                fprintf('Channel %i can not be sorted by neural net sort and MoG sort\n',i);
+                set(Handles.notifications,'String','Neural net sort and MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                continue;
             end
             WaveformInfo.Unit = Unit;
             sortcodes = WaveformInfo.Unit;
-            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-            fprintf('Channel %i has been loaded and sorted\n',i);
-            set(Handles.notifications,'String','Load and MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');
+            fprintf('Channel %i has been loaded and sorted with MoG and neural net sort\n',i);
+            set(Handles.notifications,'String','Load and MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
         elseif ismember(i,ActiveChannelList(cachedList))
             load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Sparse');
             switch Sparse
                 case 1
                     msg = sprintf('Sorting channel %i with mogSort ...',i);
                     set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
-                    load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
-                    try
-                        mogopt = mogSortOptions;
-                        mogopt.sortcodeToIgnore = scignore;
-                        mogopt.WaveformInfoUnits = WaveformInfo.Unit;
-                        Unit = mogSorter(Waveforms',mogopt);
-                        assert(~isempty(Unit),sprintf('Error:Channel %i can not been sorted\n',i));
-                    catch ME
-                        fprintf('Channel %i can not be sorted\n',i);
-                        warndlg(ME.message,'Warning');
-                        set(Handles.notifications,'String','MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                        return;
+                    load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms');
+                    [Unit] = Nas_Mog(i,Waveforms',gamma);
+                    if isempty(Unit)
+                        fprintf('Channel %i can not be sorted by neural net sort and MoG sort\n',i);
+                        set(Handles.notifications,'String','Neural net sort and MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                        continue;
                     end
                     WaveformInfo.Unit = Unit;
                     sortcodes = WaveformInfo.Unit;
-                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-                    fprintf('Channel %i has been sorted\n',i);
-                    set(Handles.notifications,'String','MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');
+                    fprintf('Channel %i has been sorted by MoG and neural net sort\n',i);
+                    set(Handles.notifications,'String','MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
                 case 2
                     msg = sprintf('Reload and sorting channel %i ...',i);
                     set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
@@ -1668,24 +1679,18 @@ for i = ch
                     updateString = get(Handles.channel,'string');
                     updateString{ActiveChannelList==i} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{ActiveChannelList==i} '</FONT></HTML>'];
                     set(Handles.channel,'string',updateString);
-                    load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms','Unit');
-                    try
-                        mogopt = mogSortOptions;
-                        mogopt.sortcodeToIgnore = scignore;
-                        mogopt.WaveformInfoUnits = WaveformInfo.Unit;
-                        Unit = mogSorter(Waveforms',mogopt);
-                        assert(~isempty(Unit),sprintf('Error:Channel %i can not been sorted\n',i));
-                    catch ME
-                        fprintf('Channel %i can not be sorted\n',i);
-                        warndlg(ME.message,'Warning');
-                        set(Handles.notifications,'String','MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));
-                        return;
+                    load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',i)),'Waveforms');
+                    [Unit] = Nas_Mog(i,Waveforms',gamma);
+                    if isempty(Unit)
+                        fprintf('Channel %i can not be sorted by neural net sort and MoG sort\n',i);
+                        set(Handles.notifications,'String','Neural net sort and MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+                        continue;
                     end
                     WaveformInfo.Unit = Unit;
                     sortcodes = WaveformInfo.Unit;
-                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','-append');
-                    fprintf('Channel %i has been reloaded and sorted\n',i);
-                    set(Handles.notifications,'String','Reload and MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',i)),'sortcodes','gamma','-append');
+                    fprintf('Channel %i has been reloaded and sortedby MoG and neural net sort\n',i);
+                    set(Handles.notifications,'String','Reload and MoG sort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
             end
         end
         
@@ -1713,6 +1718,65 @@ for i = ch
     end
 end
 
+%%
+function mogSort_adjust(~,~)
+global WaveformInfo
+global Handles
+global guiVals
+global FileInfo
+
+ActiveChannelList = get(Handles.channel,'UserData');
+chanNum = ActiveChannelList(get(Handles.channel,'Value'));
+
+[gamma,nClusters] = mogsortAdjustOption();
+if isempty(gamma) || isempty(nClusters)
+    return;
+end
+msg = sprintf('Resorting channel %i by using gamma = %.2f and %i clusters...',chanNum,gamma,nClusters);
+set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
+
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',chanNum)),'Waveforms');
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanNum)),'m');
+
+[Unit] =  Nas_Mog_adjust(chanNum,Waveforms',m,gamma,nClusters);
+
+if isempty(Unit)
+    fprintf('Channel %i can not be sorted by neural net sort and MoG sort\n',chanNum);
+    set(Handles.notifications,'String','Neural net sort and MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+    return;
+end
+WaveformInfo.Unit = Unit;
+sortcodes = WaveformInfo.Unit;
+save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanNum)),'sortcodes','gamma','nClusters','-append');
+
+fprintf('Channel %i has been resorted by using gamma = %.2f and %i clusters\n',chanNum,gamma,nClusters);
+set(Handles.notifications,'String','Resort finished!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+
+
+possibleUnits = unique(sortcodes);
+
+WaveformInfo.possibleUnits = [{255} {0} num2cell(setdiff(possibleUnits',[0 255]))];
+unitmap = WaveformInfo.possibleUnits;
+
+set(Handles.sortCodes,'String',unitmap,'Value',2:length(unitmap));
+unitmap{end+1} = 'new';
+set(Handles.toMove,'String',unitmap);
+
+WaveformInfo.sortCodes = get(Handles.sortCodes,'Value');
+for j = 1:length(FileInfo)
+    FileInfo(j).units{1,chanNum} = zeros(256,1);
+    FileInfo(j).units{1,chanNum}(unique(double(WaveformInfo.Unit))+1) = 1;
+end
+set(Handles.history,'String',{'Sort - MoG sort adjust'});
+set(Handles.history,'Value',length(get(Handles.history,'String')));
+set(Handles.history,'UserData',{'mogsort_adjust',{[]}});
+UserData = get(Handles.history,'UserData');
+Value = get(Handles.history,'Value');
+String = get(Handles.history,'String');
+save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanNum)),'String','Value','UserData','-append');
+
+%%
+
 function [ch,gamma,sc] = netsortOption()
 global Handles
 
@@ -1721,7 +1785,7 @@ chanNum = ActiveChannelList(get(Handles.channel,'Value'));
 
 sChannel = ActiveChannelList(1);
 eChannel = ActiveChannelList(end);
-msg = {sprintf('[%s]',num2str(chanNum)),'[0 0.2 1]','[255 0]'};
+msg = {sprintf('[%s]',num2str(chanNum)),'[0.2]','[255 0]'};
 SortAnswer = inputdlg({'Enter the channels:','gamma:','sort code'},'NASNET',1,msg);
 if isempty(SortAnswer) % cancel condition
     ch = [];gamma = [];sc= [];
@@ -1742,7 +1806,6 @@ try
         assert(size(gamma,1)==1 || size(gamma,2)==1,'Error:gamma cannot be a matrix');
         assert(isempty(find(gamma<0, 1)) && isempty(find(gamma>1, 1)),'Error:gamma is not valid');
         gamma = gamma(:);
-        assert(size(gamma,1)>=2,'Error:length of gamma has to be bigger or equal than 2');
         assert(isempty(find(sort(gamma) ~= gamma, 1)),'Error: gamma has to be increasing');
     catch
         uiwait(warndlg('The gamma you entered is not valid!','Warning'));
@@ -1753,7 +1816,7 @@ try
         assert(size(sc,1) == 1 || size(sc,2) ==1,'Error:sort code cannot be a matrix');
         sc = sc(:);
         assert(sum(ismember(sc,0:255))==size(sc,1),'Error:sort code is not valid');
-        assert(size(gamma,1)-size(sc,1) == 1,'Error:gamma and sort code do not match');
+        assert(size(gamma,1)-size(sc,1) == -1,'Error:gamma and sort code do not match');
     catch
         uiwait(warndlg('The sort code you entered is not valid!','Warning'));
         error('The sort code you entered is not valid!');
@@ -1761,8 +1824,8 @@ try
 catch
     count = 0;error_count= 0;
     while count == error_count
-        msg = {sprintf('[%s]',num2str(chanNum)),'[0 0.2 1]','[255 0]'};
-        SortAnswer = inputdlg({'Enter the channels:','gamma:','sort code'},'NASNET',1,msg);
+        msg = {sprintf('[%s]',num2str(chanNum)),'[0.2]','[255 0]'};
+        SortAnswer = inputdlg({'Enter the channels:','gamma:','sort code:'},'NASNET',1,msg);
         if isempty(SortAnswer) % cancel condition
             ch = [];gamma = [];sc= [];
             return
@@ -1782,7 +1845,6 @@ catch
                 assert(size(gamma,1)==1 || size(gamma,2)==1,'Error:gamma cannot be a matrix');
                 assert(isempty(find(gamma<0, 1)) && isempty(find(gamma>1, 1)),'Error:gamma is not valid');
                 gamma = gamma(:);
-                assert(size(gamma,1)>=2,'Error:length of gamma has to be bigger or equal than 2');
                 assert(isempty(find(sort(gamma) ~= gamma, 1)),'Error: gamma has to be increasing');
             catch
                 uiwait(warndlg('The gamma you entered is not valid!','Warning'));
@@ -1793,7 +1855,7 @@ catch
                 assert(size(sc,1) == 1 || size(sc,2) ==1,'Error:sort code cannot be a matrix');
                 sc = sc(:);
                 assert(sum(ismember(sc,0:255))==size(sc,1),'Error:sort code is not valid');
-                assert(size(gamma,1)-size(sc,1) == 1,'Error:gamma and sort code do not match');
+                assert(size(gamma,1)-size(sc,1) == -1,'Error:gamma and sort code do not match');
             catch
                 uiwait(warndlg('The sort code you entered is not valid!','Warning'));
                 error('The sort code you entered is not valid!');
@@ -1805,7 +1867,7 @@ catch
     end
 end
 
-function [ch,scignore] = mogsortOption()
+function [ch,gamma] = mogsortOption()
 global Handles
 
 ActiveChannelList = get(Handles.channel,'UserData');
@@ -1813,11 +1875,11 @@ chanNum = ActiveChannelList(get(Handles.channel,'Value'));
 
 sChannel = ActiveChannelList(1);
 eChannel = ActiveChannelList(end);
-msg = {sprintf('[%s]',num2str(chanNum)),'[255]'};
-SortAnswer = inputdlg({'Enter the channels:','Sort codes to ignore:'},'MoG',1,msg);
+msg = {sprintf('[%s]',num2str(chanNum)),'0.2'};
+SortAnswer = inputdlg({'Enter the channels:','gamma:(0-1)'},'NASNET + MoG',1,msg);
 if isempty(SortAnswer) % cancel condition
     ch = [];
-    scignore = [];
+    gamma = [];
     return
 end
 try
@@ -1831,25 +1893,19 @@ try
         error('The channel you entered is not valid!');
     end
     try
-        if isempty(SortAnswer{2})
-            scignore = [];
-        else
-            scignore = eval(SortAnswer{2});
-        end
-        assert(isempty(scignore) || size(scignore,1) == 1 || size(scignore,2) == 1,'Error: sort codes to ignore cannot be a matrix');
-        scignore = scignore(:);
-        assert(sum(ismember(scignore,0:255))==size(scignore,1),'Error:sort code is not valid');
+        gamma = eval(SortAnswer{2});
+        assert(gamma>0 && gamma<1,'Error: gamma needs to be bigger than 0 and less than 1');
     catch
-        uiwait(warndlg('The sort code to ignore you entered is not valid!','Warning'));
-        error('The sort code to ignore you entered is not valid!');
+        uiwait(warndlg('The gamma you entered is not valid!','Warning'));
+        error('The gamma you entered is not valid!');
     end
 catch
     count = 0;error_count= 0;
     while count == error_count
-        msg = {sprintf('[%s]',num2str(chanNum)),''};
-        SortAnswer = inputdlg({'Enter the channels:','Sort codes to ignore:'},'MoG',1,msg);
+        msg = {sprintf('[%s]',num2str(chanNum)),'0.2'};
+        SortAnswer = inputdlg({'Enter the channels:','gamma:'},'NASNET + MoG',1,msg);
         if isempty(SortAnswer) % cancel condition
-            ch = [];scignore = [];
+            ch = [];gamma = [];
             return
         end
         try
@@ -1863,17 +1919,11 @@ catch
                 error('The channel you entered is not valid!');
             end
             try
-                if isempty(SortAnswer{2})
-                    scignore = [];
-                else
-                    scignore = eval(SortAnswer{2});
-                end
-                assert(isempty(scignore) || size(scignore,1) == 1 || size(scignore,2) == 1,'Error: sort codes to ignore cannot be a matrix');
-                scignore = scignore(:);
-                assert(sum(ismember(scignore,0:255))==size(scignore,1),'Error:sort code is not valid');
+                gamma = eval(SortAnswer{2});
+                assert(gamma>0 && gamma<1,'Error: gamma needs to be bigger than 0 and less than 1');
             catch
-                uiwait(warndlg('The sort code to ignore you entered is not valid!','Warning'));
-                error('The sort code to ignore you entered is not valid!');
+                uiwait(warndlg('The gamma you entered is not valid!','Warning'));
+                error('The gamma you entered is not valid!');
             end
         catch
             error_count = error_count+1;
@@ -1881,3 +1931,146 @@ catch
         count = count +1;
     end
 end
+
+function [gamma,nClusters] = mogsortAdjustOption()
+global Handles
+global WaveformInfo
+
+ActiveChannelList = get(Handles.channel,'UserData');
+chanNum = ActiveChannelList(get(Handles.channel,'Value'));
+
+load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',chanNum)),'gamma','nClusters','bestModel');
+
+if ~isnan(nClusters)
+    msg = {sprintf('%s',num2str(gamma)),sprintf('%s',num2str(nClusters))};
+else
+    msg = {sprintf('%s',num2str(gamma)),sprintf('%s',num2str(bestModel))};
+end
+SortAnswer = inputdlg({'gamma: (0-1)','Number of Clusters:(1-5)'},'NASNET + MoG Adjust',1,msg);
+if isempty(SortAnswer) % cancel condition
+    gamma = [];
+    nClusters = [];
+    return
+end
+try
+    try
+        gamma = eval(SortAnswer{1});
+        assert(gamma>0 && gamma<1,'Error: gamma needs to be bigger than 0 and less than 1');
+    catch
+        uiwait(warndlg('The gamma you entered is not valid!','Warning'));
+        error('The gamma you entered is not valid!');
+    end
+    try
+        nClusters = eval(SortAnswer{2});
+        assert(nClusters>=1 && nClusters<=5,'Error: Number of Clusters needs to be integer and not less than one or bigger than 5');
+    catch
+        uiwait(warndlg('Number of Clusters you entered is not valid!','Warning'));
+        error('Number of Clusters you entered is not valid!');
+    end
+catch
+    count = 0;error_count= 0;
+    while count == error_count
+        msg = {sprintf('%s',num2str(gamma)),sprintf('%s',num2str(nClusters))};
+        SortAnswer = inputdlg({'gamma: (0-1)','Number of Clusters:(1-5)'},'NASNET + MoG Adjust',1,msg);
+        
+        if isempty(SortAnswer) % cancel condition
+            gamma = [];
+            nClusters = [];
+            return
+        end
+        try
+            try
+                gamma = eval(SortAnswer{1});
+                assert(gamma>0 && gamma<1,'Error: gamma needs to be bigger than 0 and less than 1');
+            catch
+                uiwait(warndlg('The gamma you entered is not valid!','Warning'));
+                error('The gamma you entered is not valid!');
+            end
+            try
+                nClusters = eval(SortAnswer{2});
+                assert(nClusters>=1 && nClusters<=5,'Error: Number of Clusters needs to be integer and not less than one or bigger than 5');
+            catch
+                uiwait(warndlg('Number of Clusters you entered is not valid!','Warning'));
+                error('Number of Clusters you entered is not valid!');
+            end
+        catch
+            error_count = error_count+1;
+        end
+        count = count +1;
+    end
+end
+
+
+function [Unit] = Nas_Mog(ch,waves,gamma)
+global WaveformInfo
+global Handles
+global guiVals
+try
+    if isfield(WaveformInfo,'NeuralNet')
+        sc = nasnet(waves,'gm',[0 gamma 1],'sortCode',[255 0],'net',WaveformInfo.NeuralNet);
+    else
+        sc = nasnet(waves,'gm',[0 gamma 1],'sortCode',[255 0]);
+    end
+    fprintf('Channel %i can be sorted by neural net sort\n',ch);
+    set(Handles.notifications,'String','Neural net sort succeed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+catch
+    sc = double.empty(size(waves,2),0);
+    fprintf('Channel %i can not be sorted by neural net sort\n',ch);
+    %warndlg(ME.message,'Warning');
+    set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+end
+try
+    mogopt = mogSortOptions;
+    [bestModel,m] = mogSorter(waves,mogopt);
+    [sortCode] = mogSorter2(waves,m,bestModel,mogopt);
+    assert(~isempty(sortCode),sprintf('Error:Channel %i can not been sorted by MoG sort\n',ch));
+    fprintf('Channel %i can be sorted by MoG sort\n',ch);
+    set(Handles.notifications,'String','MoG sort succeed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+catch
+    bestModel = NaN;
+    m = [];
+    sortCode = double.empty(size(waves,2),0);
+    fprintf('Channel %i can not be sorted by MoG sort\n',ch);
+    %warndlg(ME.message,'Warning');
+    set(Handles.notifications,'String','MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+end
+
+Unit = uint8(NasOnMog(sc,sortCode));
+save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch)),'bestModel','m','gamma','-append');
+
+function [Unit] = Nas_Mog_adjust(ch,waves,m,gamma,nClusters)
+global WaveformInfo
+global Handles
+global guiVals
+
+try
+    if isfield(WaveformInfo,'NeuralNet')
+        sc = nasnet(waves,'gm',[0 gamma 1],'sortCode',[255 0],'net',WaveformInfo.NeuralNet);
+    else
+        sc = nasnet(waves,'gm',[0 gamma 1],'sortCode',[255 0]);
+    end
+    fprintf('Channel %i can be sorted by neural net sort\n',ch);
+    set(Handles.notifications,'String','Neural net sort succeed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+catch
+    sc = double.empty(size(waves,2),0);
+    fprintf('Channel %i can not be sorted by neural net sort\n',ch);
+    %warndlg(ME.message,'Warning');
+    set(Handles.notifications,'String','Neural net sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+end
+try
+    mogopt = mogSortOptions;
+    [sortCode] = mogSorter2(waves,m,nClusters,mogopt);
+    assert(~isempty(sortCode),sprintf('Error:Channel %i can not been sorted by MoG sort\n',ch));
+    fprintf('Channel %i can be sorted by MoG sort\n',ch);
+    set(Handles.notifications,'String','MoG sort succeed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+catch
+    sortCode = double.empty(size(waves,2),0);
+    fprintf('Channel %i can not be sorted by MoG sort\n',ch);
+    %warndlg(ME.message,'Warning');
+    set(Handles.notifications,'String','MoG sort failed',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
+end
+
+Unit = uint8(NasOnMog(sc,sortCode));
+save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch)),'gamma','nClusters','-append');
+
+

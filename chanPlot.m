@@ -24,7 +24,7 @@ p.addOptional('uvoltLimit',500,@isnumeric);
 p.addOptional('plotType','spikesort',@ischar); % errorshade, spikesort, plot
 p.addOptional('numWaves',-1,@isnumeric);
 p.addOptional('resolution',800,@isnumeric);
-p.addOptional('nonoise',false,@islogical);
+p.addOptional('sortcodeToShow',[],@isnumeric);
 
 p.parse(varargin{:});
 
@@ -32,6 +32,7 @@ uvoltLimit = p.Results.uvoltLimit;
 plotType = p.Results.plotType;
 resolution = [p.Results.resolution p.Results.resolution];
 numWaves = p.Results.numWaves;
+sortcodeToShow = p.Results.sortcodeToShow(:);
 
 assert(numel(uvoltLimit)==1 || (ismatrix(uvoltLimit) && numel(uvoltLimit)==numel(channel)),'Invalid uvolt limit');
 assert(sum(strcmp(plotType,{'spikesort','errorshade','plot'})) == 1,'Invalid plot type');
@@ -76,19 +77,19 @@ spikeDisplayC({fname},channel);
 waves = WaveformInfo;
 
 if nargout < 1
-    figure;hold on;
-    % for plot comparison
-    %     fig = get(groot,'CurrentFigure');
-    %     if isempty(fig)
-    %         figure;
-    %     end
+    %figure;hold on;
+    %for plot comparison
+    fig = get(groot,'CurrentFigure');;
+    if isempty(fig)
+        figure;
+    end
     if numel(uvoltLimit) == 1
         uvoltLimit = uvoltLimit .* ones(1,numel(channel)); % row vector
     end
     %% loop over j
     y1 = inf*ones(numel(channel),1); y2=-inf*ones(numel(channel),1); x1 = ones(numel(channel),1);x2=ones(numel(channel),1);
     for j=1:numel(channel)
-        subplot(numel(channel),1,j);
+        %// subplot(numel(channel),1,j);
         
         %  nvscale(j) = FileInfo.nVperBit(uprobechan(j));
 %         units = unique(WaveformInfo(j).Unit);
@@ -101,7 +102,15 @@ if nargout < 1
         %p = find(WaveformInfo(j).Unit > 0 & WaveformInfo(j).Unit < 255);
         
         % find all waveforms
-        n = find(WaveformInfo(j).Unit >= 0 & WaveformInfo(j).Unit <= 255);
+        if isempty(sortcodeToShow)
+            n = find(WaveformInfo(j).Unit >= 0 & WaveformInfo(j).Unit <= 255);
+        else 
+            n = [];
+            for i = 1:size(sortcodeToShow,1)
+                n = unique([n;find(WaveformInfo(j).Unit == sortcodeToShow(i))]);
+            end
+        end
+            
         if numWaves > 0 && length(n)>=numWaves
             n=n(randperm(length(n),numWaves));
         end
@@ -114,7 +123,7 @@ if nargout < 1
                 WaveformInfo(j).Unit(n),resolution(1),resolution(2),y1(j),y2(j),colors,max(1,round(log10(length(n)/10))));
             
             nvscale=FileInfo.nVperBit(FileInfo.nVperBit>0);
-            disp(nvscale);
+            %disp(nvscale);
             
             % conversion factor for uV
             uvolt = nvscale(1)*.001;

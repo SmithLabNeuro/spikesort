@@ -18,15 +18,15 @@ function spikesort(filenames,varargin)
 % to appear in a particular order in the sorting (this affects the raster
 % panel). The default is false, which means the filenames will be sorted so
 % that they show up in the sorted order regardless of their index in the
-% cell array. This default (sorting enabled) is what happens if you use the 
-% GUI to load the files. 
+% cell array. This default (sorting enabled) is what happens if you use the
+% GUI to load the files.
 %
 
 %% prevent running multiple instances of spikesort
 if ~isempty(findobj('type','figure','name','Spikesort'))
     figure(findobj('type','figure','name','Spikesort'));
     return;
-end 
+end
 clear global FileInfo Handles WaveformInfo test ssDat guiVals
 global FileInfo Handles WaveformInfo test ssDat guiVals; %#ok<NUSED>
 
@@ -34,7 +34,7 @@ global FileInfo Handles WaveformInfo test ssDat guiVals; %#ok<NUSED>
 delete(timerfindall('tag','freadTimer'));
 
 %% add spikesort subfolders to path and resolve obscure Fieldtrip path issue
-folder = fileparts(which('spikesort.m')); 
+folder = fileparts(which('spikesort.m'));
 addpath(genpath(folder));
 
 % Check if Fieldtrip is in the path, and if so move the Fieldtrip functions to the bottom of the search path (to avoid function name conflicts)
@@ -44,23 +44,88 @@ fieldtripFolders = regexpi(origPath,fieldtripExpression,'match');
 newPath = strcat(regexprep(origPath,fieldtripExpression,'','ignorecase'),fieldtripFolders{:});
 path(newPath);
 
+%% Handle the command line input
+if nargin<1
+    filenames = []; %declare filenames as empty if not input
+end
+
+nSpikesToReadPerChannel = 5e4; %default
+
+p = inputParser;
+
+validationFcn1 = @(x) islogical(x) || (isnumeric(x) && x > 0 );
+validationFcn2 = @(x) islogical(x) || (isrow(x));
+validationFcn3 = @(x) isnumeric(x) && x>0 && x<1;
+p.addOptional('doSparse',false,validationFcn1);
+%p.addOptional('doTimer',false,@islogical);
+p.addOptional('noSort',false,@islogical);
+p.addOptional('readOnly',false,@islogical);
+p.addOptional('readOnlyChannel',true,validationFcn2);
+p.addOptional('writeOnly',false,@islogical);
+p.addOptional('readOnlyWithNasnet',false,@islogical);
+p.addOptional('readOnlyWithMoG',false,@islogical);
+p.addOptional('gamma',0.2,validationFcn3);
+p.addOptional('net','UberNet_N50_L1_',@ischar);
+p.addOptional('sortCode',[255 0],@isnumeric);
+
+p.parse(varargin{:});
+
+doSparse = p.Results.doSparse;
+%doTimer = p.Results.doTimer;
+doTimer = false;
+noSort = p.Results.noSort;
+readOnly = p.Results.readOnly;
+readOnlyChannel = p.Results.readOnlyChannel;
+writeOnly = p.Results.writeOnly;
+readOnlyWithNasnet = p.Results.readOnlyWithNasnet;
+readOnlyWithMoG = p.Results.readOnlyWithMoG;
+gamma = p.Results.gamma;
+netName = p.Results.net;
+sortCode = p.Results.sortCode;
+
+assert((doSparse > 0 && isnumeric(doSparse)) || islogical(doSparse)==1,'Invalid input: doSparse');
+%assert(islogical(doTimer)==1,'Invalid input: doTimer');
+assert(islogical(noSort)==1,'Invalid input: noSort');
+assert(islogical(readOnly)==1,'Invalid input: readOnly');
+assert(islogical(readOnlyChannel) == 1 || size(readOnlyChannel,1) == 1,'Invalid input: readOnlyChannel');
+assert(islogical(writeOnly)==1,'Invalid input: writeOnly');
+assert(~(readOnly && writeOnly),'Cannot do readOnly and writeOnly at the same time');
+assert(islogical(readOnlyWithNasnet)==1,'Invalid input: readOnlyWithNasnet');
+assert(islogical(readOnlyWithMoG)==1,'Invalid input: readOnlyWithMoG');
+assert(isnumeric(gamma) && gamma>0 && gamma<1,'Invalid input: gamma');
+assert(length(sortCode)==2,'Invalid input: Nesnet sort code');
+
+if doSparse > 0 && isnumeric(doSparse)
+    nSpikesToReadPerChannel = doSparse;
+    doSparse = true;
+end
+if readOnlyWithNasnet || readOnlyWithMoG
+    doSparse = false;
+end
+
+
+ssDat = struct('doTimer',doTimer,'doSparse',doSparse,'noSort',noSort,'readOnly',readOnly,'writeOnly',writeOnly,'writeOnlyValid',false);
+
+
 %% Initialize preferences if they've never run spikesort before
 if ~ispref('spikesort')
     addpref('spikesort','version','4.0');
     addpref('spikesort','cacheDirectory',pwd);
     % now bring up a gui to ask where to save cached files
-    str = sprintf('You appear to be running spikesort for the first time. Where do you want to save temporary cache files?\n Default:%s',getpref('spikesort','cacheDirectory'));
-    answer = questdlg(str,'Set Cache Directory','Use Default','Select Custom Directory','Use Default');
-    if isempty(answer)
-        answer = 'Use Default';
+    if ~readOnly && ~writeOnly
+        str = sprintf('You appear to be running spikesort for the first time. Where do you want to save temporary cache files?\n Default:%s',getpref('spikesort','cacheDirectory'));
+        answer = questdlg(str,'Set Cache Directory','Use Default','Select Custom Directory','Use Default');
+        if isempty(answer)
+            answer = 'Use Default';
+        end
+        switch answer
+            case 'Select Custom Directory'
+                dname = uigetdir(getpref('spikesort','cacheDirectory'));
+                if ~(dname==0)
+                    setpref('spikesort','cacheDirectory',dname);
+                end
+        end
     end
-    switch answer
-        case 'Select Custom Directory'
-            dname = uigetdir(getpref('spikesort','cacheDirectory'));
-            if ~(dname==0)
-                setpref('spikesort','cacheDirectory',dname);
-            end
-    end  
 else
     sspref = getpref('spikesort');
     % now check that the preferences are valid
@@ -124,37 +189,6 @@ end
 
 guiVals.colors(1,:) = guiVals.colors(1,:)/2;
 
-%% Handle the command line input
-if nargin<1
-    filenames = []; %declare filenames as empty if not input
-end
-
-nSpikesToReadPerChannel = 5e4; %default
-
-p = inputParser;
-
-validationFcn = @(x) islogical(x) || (x > 0 && isnumeric(x));
-p.addOptional('doSparse',false,validationFcn);
-p.addOptional('doTimer',false,@islogical);
-p.addOptional('noSort',false,@islogical);
-
-p.parse(varargin{:});
-
-doSparse = p.Results.doSparse;
-doTimer = p.Results.doTimer;
-noSort = p.Results.noSort;
-
-assert((doSparse > 0 && isnumeric(doSparse)) || islogical(doSparse)==1,'Invalid input: doSparse');
-assert(islogical(doTimer)==1,'Invalid input: doTimer');
-assert(islogical(noSort)==1,'Invalid input: noSort');
-
-if doSparse > 0 && isnumeric(doSparse)
-    nSpikesToReadPerChannel = doSparse;
-    doSparse = true;
-end
-
-ssDat = struct('doTimer',doTimer,'doSparse',doSparse,'noSort',noSort);
-
 %% initialize WaveformInfo structure
 WaveformInfo=struct('cached',nargin==2,'ChannelNumber',0,'NumSamples',[],...
     'x2',1,'x1',0,'selected',[],...
@@ -168,229 +202,281 @@ WaveformInfo.dataLocation = pwd;
 FileInfo=struct('filename',[],'format','nev','HeaderSize',0,...
     'PacketSize',0,'ActiveChannels',[],'PacketOrder',uint8([]),...
     'SpikesNumber',[],'BytesPerSample',0,'bytes',[],...
-    'nSpikesToReadPerChannel',nSpikesToReadPerChannel); 
+    'nSpikesToReadPerChannel',nSpikesToReadPerChannel);
 
-%% GUI objects declarations
-Handles.mainWindow = figure('Color',[0.8 0.8 0.8], ...
-    'Windowstyle','normal',...
-    'MenuBar','none', ...
-    'Name','Spikesort', ...
-    'NumberTitle','off', ...
-    'OuterPosition',guiVals.winPos, ...
-    'Tag','mainWin', ...
-    'ToolBar','none',...
-    'keypressfcn',@(~,evt)spikesort_gui('keyfcn',evt),...
-    'deletefcn',@closefiles);
-winMenu.file = uimenu('Label','&File');
-uimenu(winMenu.file,...
-    'Label','Load data...',...
-    'Accelerator','L',... 
-    'Callback',@loadData,... 
-    'Enable','on',...
-    'tag','dataloader');
-uimenu(winMenu.file,...
-    'Label','Sparse load',...
-    'Accelerator','P',...
-    'Separator','on',...
-    'Callback',@loadStatus,...
-    'Enable','on',...
-    'Checked','off',...
-    'tag','loadstatus');
-uimenu(winMenu.file,...
-    'Label','Backgroud reading',...
-    'Accelerator','B',...
-    'Checked','on',...
-    'Callback',@timerStatus,...
-    'Enable','on',...
-    'Checked','off',...
-    'tag','timerstatus');
-uimenu(winMenu.file,...
-    'Label','Write data...',...
-    'Accelerator','W',...
-    'Separator','on',...
-    'Callback','spikesort_gui write',...
-    'enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.file,...
-    'Label','Save sort as...',...
-    'Accelerator','S',...
-    'Separator','on',...
-    'enable','off',...
-    'tag','enableOnLoad',...
-    'Callback',@saveSort);
-uimenu(winMenu.file,...
-    'Label','Resume saved sort...',...
-    'Accelerator','R',...
-    'enable','off',...
-    'tag','enableOnLoad',...
-    'Callback',@loadSort);
-uimenu(winMenu.file,...
-    'Label','Set Cache Directory',...
-    'Separator','on',...
-    'tag','setCache',...
-    'callback',@setCache,...
-    'Enable','on');
-uimenu(winMenu.file,...
-    'Label','Show file ordering',...
-    'Separator','on',...
-    'tag','enableOnLoad',...
-    'callback',@showfiles,...
-    'Enable','off');
-uimenu(winMenu.file,...
-    'Label','Close files',...
-    'Separator','on',...
-    'tag','enableOnLoad',...
-    'callback',@closefiles,...
-    'Enable','off');
-uimenu(winMenu.file,...
-    'Label','Exit Spikesort',...
-    'Accelerator','Q',...
-    'Separator','on',...
-    'Callback','delete(gcf)',...
-    'Enable','on');
 
-winMenu.edit = uimenu('Label','&Edit');
-uimenu(winMenu.edit,...
-    'Label','Undo',...
-    'Accelerator','Z',...
-    'Callback','spikesort_gui undo',...
-    'tag','undo',...
-    'Enable','off');
-uimenu(winMenu.edit,...
-    'Label','Clear history on all channels',...
-    'callback',@clearAllHistory,...
-    'Separator','off',...
-    'userdata',false,...
-    'tag','noRedraw',...
-    'enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.edit,...
-    'Label','Select all waveforms',...
-    'Accelerator','A',...
-    'Callback','spikesort_gui selectAll',...
-    'Separator','on',...
-    'enable','off',...
-    'tag','enableOnLoad');
-
-winMenu.view = uimenu('Label','&View');
-uimenu(winMenu.view,...
-    'Label','Zoom in',...
-    'Accelerator','=',...
-    'Callback',@zoomSpikes,...
-    'Enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.view,...
-    'Label','Zoom out',...
-    'Accelerator','-',...
-    'Callback',@zoomSpikes,...
-    'Enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.view,...
-    'Label','Reset y-axis',...
-    'Accelerator','0',...
-    'Callback',@zoomSpikes,...
-    'Enable','off',...
-    'tag','enableOnLoad');
-Handles.showThreshold = uimenu(winMenu.view,...
-    'Label','Show Threshold',...
-    'Separator','on',...
-    'Accelerator','t',...
-    'callback',@toggleThreshold,...
-    'enable','off',...
-    'tag','enableOnLoad');
-Handles.showPca = uimenu(winMenu.view,...
-    'Label','Show PCA scatter',...
-    'Accelerator','p',...
-    'callback',@togglePca,...
-    'userdata',[1,2],...  %initial components to plot
-    'enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.view,...
-    'Label','Reset raster limits',...
-    'Callback','spikesort_gui rasterLim',...
-    'Separator','on',...
-    'Enable','off',...
-    'tag','enableOnLoad');
-uimenu(winMenu.view,...
-    'Label','Clear threshold',...
-    'Callback','spikesort_gui clear_threshold',...
-    'enable','off',...
-    'tag','enableOnLoad');
-
-winMenu.wind = uimenu('Label','&Window');
-uimenu(winMenu.wind,...
-    'Label','Show/hide command history',...
-    'Accelerator','h',...
-    'Callback',@toggleHistoryVisibility,...
-    'Enable','on');
-
-winMenu.sort = uimenu('Label','&Sort');
-% uimenu(winMenu.sort,...
-%     'Label','NASnet classify',...
-%     'Callback','spikesort_gui netsort',...
-%     'enable','off',...
-%     'tag','enableOnLoad');
-% uimenu(winMenu.sort,...
-%     'Label','NASnet set',...
-%     'Callback',@setNet,...
-%     'enable','on',...
-%     'tag','setNet');
-
-uimenu(winMenu.sort,...
-    'Label','MoG sort',...
-    'Callback','spikesort_gui mogsort',...
-    'enable','off',...
-    'tag','enableOnLoad');
-%    'separator','on',...
+if readOnly || readOnlyWithNasnet ||  readOnlyWithMoG
+    delete(findobj('type','figure','name','Spikesort'));
+    if readOnlyWithMoG
+        if ~isempty(filenames)
+            ReadOnlyData(filenames,readOnlyChannel,'readOnlyWithMoG',readOnlyWithMoG,'gamma',gamma,'net',netName);
+            manageTempFiles;
+        end
+    elseif readOnlyWithNasnet
+        if ~isempty(filenames)
+            ReadOnlyData(filenames,readOnlyChannel,'readOnlyWithNasnet',readOnlyWithNasnet,'gamma',gamma,'sortCode',sortCode,'net',netName);
+            manageTempFiles;
+        end
+    elseif readOnly
+        if ~isempty(filenames)
+            ReadOnlyData(filenames,readOnlyChannel);
+            manageTempFiles;
+        end
+    end
+    %% GUI objects declarations
+else
+    Handles.mainWindow = figure('Color',[0.8 0.8 0.8], ...
+        'Windowstyle','normal',...
+        'MenuBar','none', ...
+        'Name','Spikesort', ...
+        'NumberTitle','off', ...
+        'OuterPosition',guiVals.winPos, ...
+        'Tag','mainWin', ...
+        'ToolBar','none',...
+        'keypressfcn',@(~,evt)spikesort_gui('keyfcn',evt),...
+        'deletefcn',@closefiles);
+    winMenu.file = uimenu('Label','&File');
+    uimenu(winMenu.file,...
+        'Label','Load data...',...
+        'Accelerator','L',...
+        'Callback',@loadData,...
+        'Enable','on',...
+        'tag','dataloader');
+    uimenu(winMenu.file,...
+        'Label','Sparse load',...
+        'Accelerator','P',...
+        'Separator','on',...
+        'Callback',@loadStatus,...
+        'Enable','on',...
+        'Checked','off',...
+        'tag','loadstatus');
+%     uimenu(winMenu.file,...
+%         'Label','Backgroud reading',...
+%         'Accelerator','B',...
+%         'Checked','on',...
+%         'Callback',@timerStatus,...
+%         'Enable','on',...
+%         'Checked','off',...
+%         'tag','timerstatus');
+    uimenu(winMenu.file,...
+        'Label','Write data...',...
+        'Accelerator','W',...
+        'Separator','on',...
+        'Callback','spikesort_gui write',...
+        'enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.file,...
+        'Label','Save sort as...',...
+        'Accelerator','S',...
+        'Separator','on',...
+        'enable','off',...
+        'tag','enableOnLoad',...
+        'Callback',@saveSort);
+    uimenu(winMenu.file,...
+        'Label','Resume saved sort...',...
+        'Accelerator','R',...
+        'enable','off',...
+        'tag','enableOnLoad',...
+        'Callback',@loadSort);
+    uimenu(winMenu.file,...
+        'Label','Set Cache Directory',...
+        'Separator','on',...
+        'tag','setCache',...
+        'callback',@setCache,...
+        'Enable','on');
+    uimenu(winMenu.file,...
+        'Label','Show file ordering',...
+        'Separator','on',...
+        'tag','enableOnLoad',...
+        'callback',@showfiles,...
+        'Enable','off');
+    uimenu(winMenu.file,...
+        'Label','Close files',...
+        'Separator','on',...
+        'tag','enableOnLoad',...
+        'callback',@closefiles,...
+        'Enable','off');
+    uimenu(winMenu.file,...
+        'Label','Exit Spikesort',...
+        'Accelerator','Q',...
+        'Separator','on',...
+        'Callback','delete(gcf)',...
+        'Enable','on');
     
-
-winMenu.help = uimenu('Label','&Help');
-uimenu(winMenu.help,...
-    'Label','Online help...',...
-    'Callback','web https://github.com/smithlabvision/spikesort -browser',...
-    'Enable','on');
-uimenu(winMenu.help,...
-    'Label','About Spikesort...',...
-    'Callback',@showDisclaimer,...
-    'userdata',true,...
-    'separator','on',...
-    'Enable','on');
-
-initializeGui;
-set(findobj(gcf,'tag','dataloader'),'userdata',filenames);
-set(findobj(gcf,'tag','enableOnLoad'),'enable','off');
-if ~doSparse
-    set(findobj(gcf,'tag','loadstatus'),'checked','off');
-else
-    set(findobj(gcf,'tag','loadstatus'),'checked','on');
-end
-if ~doTimer
-    set(findobj(gcf,'tag','timerstatus'),'checked','off');
-else
-    set(findobj(gcf,'tag','timerstatus'),'checked','on');
-end
-Handles.ChannelString = [];
-
-axes(Handles.plotHandle);
-cla reset;
-text(0.5,0.5,{'\fontsize{42} Spikesort', ...
-    '\fontsize{24} by the Smith Laboratory'},'horizontalAlignment','center','Color','black');
-
-%Check for a crash here, move temporary files to a "tempsort" file, and notify the user
-d = dir(fullfile(WaveformInfo.sortFileLocation,['spikesortunits' filesep 'hist*']));
-d([d.isdir]) = [];
-if ~isempty(d) %the temporary sort files were not cleaned up... indicates that spikesort probably crashed during the last session...
-% here, save spikesortunits to tempsort file and notify the user
-    manageTempFiles;
-    warndlg({'It appears that Spikesort was not properly shut down.';...
-         'Your sort has been saved in a tempsort file now.'},'Crash Warning');    
-end
-
-ssDat.doTimer = doTimer;
-ssDat.doSparse = doSparse;
-set(gcf,'userdata',ssDat);
-if ~isempty(filenames)
-    loadData(gcf)
+    winMenu.edit = uimenu('Label','&Edit');
+    uimenu(winMenu.edit,...
+        'Label','Undo',...
+        'Accelerator','Z',...
+        'Callback','spikesort_gui undo',...
+        'tag','undo',...
+        'Enable','off');
+    uimenu(winMenu.edit,...
+        'Label','Clear history on all channels',...
+        'callback',@clearAllHistory,...
+        'Separator','off',...
+        'userdata',false,...
+        'tag','noRedraw',...
+        'enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.edit,...
+        'Label','Select all waveforms',...
+        'Accelerator','A',...
+        'Callback','spikesort_gui selectAll',...
+        'Separator','on',...
+        'enable','off',...
+        'tag','enableOnLoad');
+    
+    winMenu.view = uimenu('Label','&View');
+    uimenu(winMenu.view,...
+        'Label','Zoom in',...
+        'Accelerator','=',...
+        'Callback',@zoomSpikes,...
+        'Enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.view,...
+        'Label','Zoom out',...
+        'Accelerator','-',...
+        'Callback',@zoomSpikes,...
+        'Enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.view,...
+        'Label','Reset y-axis',...
+        'Accelerator','0',...
+        'Callback',@zoomSpikes,...
+        'Enable','off',...
+        'tag','enableOnLoad');
+    Handles.showThreshold = uimenu(winMenu.view,...
+        'Label','Show Threshold',...
+        'Separator','on',...
+        'Accelerator','t',...
+        'callback',@toggleThreshold,...
+        'enable','off',...
+        'tag','enableOnLoad');
+    Handles.showPca = uimenu(winMenu.view,...
+        'Label','Show PCA scatter',...
+        'Accelerator','p',...
+        'callback',@togglePca,...
+        'userdata',[1,2],...  %initial components to plot
+        'enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.view,...
+        'Label','Reset raster limits',...
+        'Callback','spikesort_gui rasterLim',...
+        'Separator','on',...
+        'Enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.view,...
+        'Label','Clear threshold',...
+        'Callback','spikesort_gui clear_threshold',...
+        'enable','off',...
+        'tag','enableOnLoad');
+    
+    winMenu.wind = uimenu('Label','&Window');
+    uimenu(winMenu.wind,...
+        'Label','Show/hide command history',...
+        'Accelerator','h',...
+        'Callback',@toggleHistoryVisibility,...
+        'Enable','on');
+    
+    winMenu.sort = uimenu('Label','&Sort');
+    uimenu(winMenu.sort,...
+        'Label','NASnet classify',...
+        'Callback','spikesort_gui netsort',...
+        'enable','off',...
+        'tag','enableOnLoad');
+    uimenu(winMenu.sort,...
+        'Label','NASnet set',...
+        'Callback',@setNet,...
+        'enable','on',...
+        'tag','setNet');
+    
+    uimenu(winMenu.sort,...
+        'Label','NASnet + MoG sort',...
+        'Callback','spikesort_gui mogsort',...
+        'enable','off',...
+        'separator','on',...
+        'tag','enableOnLoad');
+    Handles.adjustSort = uimenu(winMenu.sort,...
+        'Label','NASnet + MoG adjust',...
+        'Callback','spikesort_gui mogsort_adjust',...
+        'enable','off',...
+        'tag','adjustSort');
+    
+    
+    
+    winMenu.help = uimenu('Label','&Help');
+    uimenu(winMenu.help,...
+        'Label','Online help...',...
+        'Callback','web https://github.com/smithlabvision/spikesort -browser',...
+        'Enable','on');
+    uimenu(winMenu.help,...
+        'Label','About Spikesort...',...
+        'Callback',@showDisclaimer,...
+        'userdata',true,...
+        'separator','on',...
+        'Enable','on');
+    
+    initializeGui;
+    if writeOnly
+        set(gcf,'Visible','off');
+    end
+    set(findobj(gcf,'tag','dataloader'),'userdata',filenames);
+    set(findobj(gcf,'tag','enableOnLoad'),'enable','off');
+    if ~doSparse
+        set(findobj(gcf,'tag','loadstatus'),'checked','off');
+    else
+        set(findobj(gcf,'tag','loadstatus'),'checked','on');
+    end
+%     if ~doTimer
+%         set(findobj(gcf,'tag','timerstatus'),'checked','off');
+%     else
+%         set(findobj(gcf,'tag','timerstatus'),'checked','on');
+%     end
+    Handles.ChannelString = [];
+    
+    axes(Handles.plotHandle);
+    cla reset;
+    text(0.5,0.5,{'\fontsize{42} Spikesort', ...
+        '\fontsize{24} by the Smith Laboratory'},'horizontalAlignment','center','Color','black');
+    
+    %Check for a crash here, move temporary files to a "tempsort" file, and notify the user
+    d = dir(fullfile(WaveformInfo.sortFileLocation,['spikesortunits' filesep 'hist*']));
+    d([d.isdir]) = [];
+    if ~isempty(d) %the temporary sort files were not cleaned up... indicates that spikesort probably crashed during the last session...
+        % here, save spikesortunits to tempsort file and notify the user
+        load(fullfile(WaveformInfo.sortFileLocation,['spikesortunits' filesep d(1).name]),'filenames');
+        [~,filename,~] = fileparts(filenames{1});
+        [~,tempfile,~] = fileparts(tempname);
+        tempfile = fullfile(WaveformInfo.sortFileLocation,strcat('tempsort_',filename,'_',tempfile(1:10)));
+        saveSort(-1,tempfile); %<---- need to handle the temporary file names here...
+        warndlg({'It appears that Spikesort was not properly shut down.';...
+            'Your sort has been saved in a tempsort file now.'},'Crash Warning');
+    end
+    tempSortFiles = dir(fullfile(WaveformInfo.sortFileLocation,'spikesortunits'));
+    tempSortFiles([tempSortFiles.isdir]) = []; %strip off directories
+    tempSortFiles = {tempSortFiles.name};
+    tempSortFiles = cellfun(@strcat,repmat({[WaveformInfo.sortFileLocation,filesep,'spikesortunits',filesep]},size(tempSortFiles)),tempSortFiles,'uniformoutput',0);
+    if ~isempty(tempSortFiles)
+        delete(tempSortFiles{:});
+    end
+    ssDat.doTimer = doTimer;
+    ssDat.doSparse = doSparse;
+    set(gcf,'userdata',ssDat);
+    if writeOnly
+        if ~isempty(filenames)
+            set(gcf,'Visible','off');
+            loadData(gcf);
+            if ssDat.writeOnlyValid
+                spikesort_gui('write');
+            end
+            closefiles;
+            delete(findobj('type','figure','name','Spikesort'));
+        end
+    else
+        if ~isempty(filenames)
+            loadData(gcf)
+        end
+    end    
 end
 
 
@@ -510,7 +596,7 @@ Handles.ISI4 = axes('Parent',j0, ...
     'CameraUpVector',[0 1 0], ...
     'CameraUpVectorMode','manual', ...
     'Clipping','off', ...
-    'Color',[1 1 1], ...                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+    'Color',[1 1 1], ...
     'NextPlot','add', ...
     'Units','normalized', ...
     'Position',[.1 .04 .8 .15], ...
@@ -587,7 +673,7 @@ Handles.holdTheLine = uicontrol('Parent',h0, ...
     'Tag','HistoryEnable', ...
     'UserData','[ ]', ...
     'tag','enableOnLoad',...
-    'Value',0); 
+    'Value',0);
 
 uicontrol('Parent',h0, ...
     'BackgroundColor',[.8 .8 .8], ...
@@ -722,11 +808,10 @@ Handles.sortCodes = uicontrol('Parent',h0, ...
     'Style','listbox', ...
     'UserData','[ ]', ...
     'Value',1, ...
-    'Max',2, ...
-    'keypressfcn','spikesort_gui keyfcn',...
+    'Max',2, ...  
     'tag','enableOnLoad',...
     'Callback', 'spikesort_gui update');
-
+%'keypressfcn','spikesort_gui keyfcn',...
 uicontrol('Parent',h0, ...
     'Callback','spikesort_gui moveSelected', ...
     'ListboxTop',0, ...
@@ -817,16 +902,16 @@ switch lower(get(src,'checked'))
         set(src,'checked','on');
 end
 
-function timerStatus(src,~)
-global ssDat
-switch lower(get(src,'checked'))
-    case 'on'
-        ssDat.doTimer = false;
-        set(src,'checked','off');
-    case 'off'
-        ssDat.doTimer = true;
-        set(src,'checked','on');
-end
+% function timerStatus(src,~)
+% global ssDat
+% switch lower(get(src,'checked'))
+%     case 'on'
+%         ssDat.doTimer = false;
+%         set(src,'checked','off');
+%     case 'off'
+%         ssDat.doTimer = true;
+%         set(src,'checked','on');
+% end
 
 function loadData(src,~)
 
@@ -860,7 +945,7 @@ else
         feval(get(findobj(gcf,'label','Close files'),'callback'),[],[]);
     end
     set(findobj(gcf,'tag','setCache'),'enable','off');
-    if ~iscell(filenames), filenames={filenames}; end 
+    if ~iscell(filenames), filenames={filenames}; end
     if length(filenames)>1
         filenames=sort(filenames);
     end
@@ -897,7 +982,7 @@ ActiveChannelList = [];
 for i = 1:length(FileInfo)
     spikesort_nevscan(i);
     ActiveChannelList = union(ActiveChannelList,FileInfo(i).ActiveChannels);
-    FileInfo(i).maskedPacketOrder = FileInfo(i).PacketOrder; 
+    FileInfo(i).maskedPacketOrder = FileInfo(i).PacketOrder;
 end
 
 %ensure that we aren't at the upper limit of channel indices that we
@@ -934,8 +1019,8 @@ if length(unique([FileInfo(:).PacketSize]))~=1
 end
 
 if ~exist(fullfile(WaveformInfo.sortFileLocation,'spikesortunits/'),'dir')
-    status = mkdir(fullfile(WaveformInfo.sortFileLocation,'spikesortunits')); 
-    assert(status,'Unable to make directory %s',fullfile(WaveformInfo.sortFileLocation,'spikesortunits')); 
+    status = mkdir(fullfile(WaveformInfo.sortFileLocation,'spikesortunits'));
+    assert(status,'Unable to make directory %s',fullfile(WaveformInfo.sortFileLocation,'spikesortunits'));
 end
 
 ChannelString = cell(length(ActiveChannelList),1);
@@ -944,12 +1029,12 @@ for i=1:length(ActiveChannelList)
     
     totalSpikes = 0;
     for h = 1:length(FileInfo)
-        if ismember(i2,FileInfo(h).ActiveChannels) 
+        if ismember(i2,FileInfo(h).ActiveChannels)
             totalSpikes=totalSpikes + FileInfo(h).SpikesNumber(i2);
         end
     end
     
-    ChannelString{i} =  sprintf(' %i (%i)',i2,totalSpikes); 
+    ChannelString{i} =  sprintf(' %i (%i)',i2,totalSpikes);
 end
 Handles.ChannelString = ChannelString;
 
@@ -968,7 +1053,13 @@ for i=1:length(ActiveChannelList)
         String = [];
         UserData = [];
         Value = 0;
-        save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(i))),'UserData','String','Value','filenames');
+        bestModel = nan;
+        m = [];
+        gamma = nan;
+        nClusters = nan;
+        ComponentLoadings = [];
+        me = [];
+        save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(i))),'UserData','String','Value','filenames','bestModel','gamma','m','nClusters','ComponentLoadings','me');
     end
     
 end
@@ -1004,7 +1095,7 @@ for i = 1:numel(ActiveChannelList)
             case 1
                 updateString{i} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{i} '</FONT></HTML>'];
             case 2
-                updateString{i} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{i} '</FONT></HTML>'];                
+                updateString{i} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{i} '</FONT></HTML>'];
         end
     end
 end
@@ -1012,7 +1103,7 @@ set(Handles.channel,'string',updateString);
 set(Handles.notifications,'String','Scanning finished!',guiVals.noteString,guiVals.noteVals(2,:));
 set(findobj(gcf,'tag','dataloader'),'enable','off');
 
-if ~TempTag
+if ~TempTag && ~ssDat.writeOnly
     sChannel = ActiveChannelList(1);
     eChannel = ActiveChannelList(end);
     msg = {sprintf('[%s:%s]',num2str(sChannel),num2str(eChannel))};
@@ -1031,7 +1122,7 @@ if ~TempTag
             uiwait(warndlg('The channels you want to load is unaccepted!','Warning'));
             error('The channels you want to load is unaccepted!');
         end
-    catch 
+    catch
         count = 0;error_count= 0;
         while count == error_count
             msg = {sprintf('[%s:%s]',num2str(sChannel),num2str(eChannel))};
@@ -1050,41 +1141,306 @@ if ~TempTag
                     uiwait(warndlg('The channels you want to load is unaccepted!','Warning'));
                     error('The channels you want to load is unaccepted!');
                 end
-            catch 
+            catch
                 error_count = error_count+1;
             end
             count = count +1;
         end
     end
-    set(Handles.notifications,'String','Start loading channels ...',guiVals.noteString,guiVals.noteVals(1,:));
+    set(Handles.notifications,'String','Start loading channels ...',guiVals.noteString,guiVals.noteVals(1,:));drawnow;
     for j = ch
         if ismember(j,ActiveChannelList(~cachedList))
+            set(Handles.channel,'Value',find(ActiveChannelList==j));
             msg = sprintf('Loading channel %i ...',j);
-            set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));
+            set(Handles.notifications,'String',msg,guiVals.noteString,guiVals.noteVals(1,:));drawnow;
             readSampleWaveforms(j,'off',ssDat.doTimer,ssDat.doSparse);
-            load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',j)),'Sparse');
-            updateString = get(Handles.channel,'string');
-            switch Sparse
-                case 1
-                    updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{2} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-                case 2
-                    updateString{(ActiveChannelList==j)} = ['<HTML><FONT color=' guiVals.chanColor{3} '>' ChannelString{(ActiveChannelList==j)} '</FONT></HTML>'];
-            end
-            set(Handles.channel,'string',updateString);
             dispMsg = sprintf('Channel %i has just been loaded',j);
         elseif ismember(j,ActiveChannelList(cachedList))
+            set(Handles.channel,'Value',find(ActiveChannelList==j));
+            spikesort_gui load;
             dispMsg = sprintf('Channel %i has already been loaded',j);
         else
             dispMsg = sprintf('Channel %i does not exist',j);
         end
         disp(dispMsg);
     end
-    disp('Loading finished!');   
-    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
-
+    disp('Loading finished!');
+    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
 else
-    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));
+    set(Handles.notifications,'String','Ready to sort!',guiVals.noteString,guiVals.noteVals(2,:));drawnow;
 end
+
+
+function ReadOnlyData(filenames,readOnlyChannel,varargin)
+
+%ReadOnlyData(filenames,readOnlyChannel,'readOnlyWithNasnet',readOnlyWithNasnet,'gamma',gamma,'sortCode',sortCode,'net',netName);
+
+global FileInfo WaveformInfo currentlyReadChannel ssDat
+
+p = inputParser;
+
+validationFcn3 = @(x) isnumeric(x) && x>0 && x<1;
+p.addOptional('readOnlyWithNasnet',false,@islogical);
+p.addOptional('readOnlyWithMoG',false,@islogical);
+p.addOptional('gamma',0.2,validationFcn3);
+p.addOptional('net','UberNet_N50_L1_',@ischar);
+p.addOptional('sortCode',[255 0],@isnumeric);
+
+p.parse(varargin{:});
+
+readOnlyWithNasnet = p.Results.readOnlyWithNasnet;
+readOnlyWithMoG = p.Results.readOnlyWithMoG;
+
+
+assert(islogical(readOnlyWithNasnet)==1,'Invalid input: readOnlyWithNasnet');
+assert(islogical(readOnlyWithMoG)==1,'Invalid input: readOnlyWithMoG');
+
+currentlyReadChannel = 1;
+
+WaveformInfo.sortFileLocation = getpref('spikesort','cacheDirectory');
+WaveformInfo.dataLocation = pwd;
+
+if ~iscell(filenames), filenames={filenames}; end
+if ~ssDat.noSort
+    if length(filenames)>1
+        filenames=sort(filenames);
+    end
+end
+
+warnflag = 0;
+for i=1:length(filenames)
+    FileInfo(i).filename=filenames{i};
+    D = dir(filenames{i});
+    assert(~isempty(D),'File %s not found',filenames{i});
+    FileInfo(i).bytes = D.bytes;
+    if (warnflag == 0)
+        if (D.bytes >= 2^31) % File > 2 GB
+            if (~strfind(computer,'64')) % Not using 64-bit matlab
+                warning('spikesort:bigfile32bit','DO NOT SORT FILES > 2 GB WITH 32-BIT MATLAB');
+                warndlg('DO NOT SORT FILES > 2 GB WITH 32-BIT MATLAB');
+            end
+        end
+        warnflag = 1;
+    end
+end
+
+for h = 1:length(FileInfo)
+    FileInfo(h).nSpikesToReadPerChannel = FileInfo(1).nSpikesToReadPerChannel;
+end
+
+ActiveChannelList = [];
+
+for i = 1:length(FileInfo)
+    spikesort_nevscan(i);
+    ActiveChannelList = union(ActiveChannelList,FileInfo(i).ActiveChannels);
+    FileInfo(i).maskedPacketOrder = FileInfo(i).PacketOrder;
+end
+
+%ensure that we aren't at the upper limit of channel indices that we
+%can represent (so we can add a new one for the mask).
+assert(max(ActiveChannelList)<intmax(class(FileInfo(1).PacketOrder)),'Maximum active channel index equals maximum value for packet order class');
+%choose a subset of spikes to read from disk:
+for ch =1:numel(ActiveChannelList)
+    [PacketNumbers,cumulativePn] = deal({[]});
+    for i=1:length(FileInfo)
+        PacketNumbers{i} = find(FileInfo(i).PacketOrder == ActiveChannelList(ch));
+        if i>1
+            %add the number of events from previous files to the packet
+            %numbers from this file:
+            cumulativePn{i} = PacketNumbers{i}+numel(vertcat(FileInfo(1:i-1).PacketOrder));
+        else
+            cumulativePn{i} = PacketNumbers{i};
+        end
+    end
+    allPn = vertcat(cumulativePn{:});
+    subset = allPn(randperm(numel(allPn),min(FileInfo(1).nSpikesToReadPerChannel,numel(allPn))));
+    for i=1:length(FileInfo)
+        %If the packet isn't in the subset, then set the packet order
+        %to be greater than the maximum active channel index to ignore it
+        FileInfo(i).maskedPacketOrder(PacketNumbers{i}(~ismember(cumulativePn{i},subset))) = max(ActiveChannelList)+1;
+    end
+end
+
+WaveformInfo.NumSamples = FileInfo(1).NumSamples;
+WaveformInfo.x2 = (FileInfo(1).NumSamples) * 1000 / FileInfo(1).TimeResolutionSamples;
+WaveformInfo.x1 = -1000/FileInfo(1).TimeResolutionSamples;
+
+if length(unique([FileInfo(:).PacketSize]))~=1
+    error('Variable Packet Sizes');
+end
+
+if ~exist(fullfile(WaveformInfo.sortFileLocation,'spikesortunits/'),'dir')
+    status = mkdir(fullfile(WaveformInfo.sortFileLocation,'spikesortunits'));
+    assert(status,'Unable to make directory %s',fullfile(WaveformInfo.sortFileLocation,'spikesortunits'));
+end
+
+for i=1:length(ActiveChannelList)
+    String = [];
+    UserData = [];
+    Value = 0;
+    bestModel = nan;
+    m = [];
+    gamma = nan;
+    nClusters = nan;
+    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(i))),'UserData','String','Value','filenames','bestModel','gamma','m','nClusters');
+end
+if islogical(readOnlyChannel)
+    ch = ActiveChannelList;
+else
+    ch = readOnlyChannel;
+end
+for j = 1:numel(ch)
+    if ismember(ch(j),ActiveChannelList)
+        totalSpikes = 0;
+        for h = 1:length(FileInfo)
+            if ismember(ch(j),FileInfo(h).ActiveChannels)
+                totalSpikes=totalSpikes + FileInfo(h).SpikesNumber(find(ch(j)==ActiveChannelList));
+            end
+        end
+        if ssDat.doSparse && totalSpikes > FileInfo(1).nSpikesToReadPerChannel
+            Sparse = 2;
+            nSpikesToRead = FileInfo(1).nSpikesToReadPerChannel;
+        else
+            Sparse = 1;
+            nSpikesToRead = 0;
+        end
+        if Sparse == 1
+            PacketNumbers = [];
+            
+            for i=1:length(FileInfo)
+                nums = find(FileInfo(i).PacketOrder == ch(j));
+                PacketNumbers = [PacketNumbers; ones(length(nums),1)*i nums]; %#ok<*AGROW>
+            end
+            
+            Waveforms = [];
+            Unit = [];
+            Times = [];
+            Breaks = zeros(length(FileInfo),1);
+            
+            for i = find(cellfun(@ismember,repmat({ch(j)},size(FileInfo)),{FileInfo.ActiveChannels}))
+                PN = PacketNumbers(PacketNumbers(:,1)==i,2);
+                loc = FileInfo(i).HeaderSize + FileInfo(i).Locations(PN);
+                
+                [wav,tim,uni] = readWaveforms2(loc,WaveformInfo.NumSamples,FileInfo(i).filename);
+                wav = int16(double(wav) / 1000 * FileInfo(i).nVperBit(ch(j)));
+                
+                Waveforms = [Waveforms; wav'];
+                
+                newTimes = double(tim)/FileInfo(i).TimeResolutionTimeStamps*1000;
+                
+                if i < length(FileInfo)
+                    if isempty(newTimes)
+                        Breaks(i+1) = Breaks(i);
+                    else
+                        Breaks(i+1) = Breaks(i)+max(newTimes);
+                    end
+                end
+                
+                newTimes = newTimes + Breaks(i);
+                
+                Times = [Times; newTimes];
+                Unit = [Unit; uni];
+                
+                FileInfo(i).units{ch(j)} = zeros(256,1);
+                FileInfo(i).units{ch(j)}(unique(double(Unit))+1) = 1;
+            end
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Waveforms','Times','Unit','Breaks','Sparse','nSpikesToRead');
+            dispMsg = sprintf('Channel %i has just been loaded',ch(j));
+            if readOnlyWithNasnet
+                gamma = p.Results.gamma;
+                netName = p.Results.net;
+                sortCode = p.Results.sortCode;
+                assert(isnumeric(gamma) && gamma>0 && gamma<1,'Invalid input: gamma');
+                assert(length(sortCode)==2,'Invalid input: Nesnet sort code');
+                try
+                    sortcodes = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',sortCode,'net',netName);
+                    String = {'Sort - neural net sort'};
+                    UserData = {'netsort' {[]}};
+                    Value = 1;
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch(j))),'sortcodes','String','UserData','Value','gamma','-append');
+                    dispMsg = sprintf('Channel %i has just been loaded and sorted with neural net sort',ch(j));
+                catch
+                    String = [];
+                    UserData = [];
+                    Value = 0;
+                    gamma = nan;
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch(j))),'String','UserData','Value','gamma','-append');
+                    dispMsg = sprintf('Channel %i can not be sorted by neural net sort\n',ch(j));
+                end
+            elseif readOnlyWithMoG
+                gamma = p.Results.gamma;
+                netName = p.Results.net;
+                assert(isnumeric(gamma) && gamma>0 && gamma<1,'Invalid input: gamma');
+                try
+                    sc = nasnet(Waveforms','gm',[0 gamma 1],'sortCode',[255 0],'net',netName);
+                    mogopt = mogSortOptions;
+                    [bestModel,m] = mogSorter(Waveforms',mogopt);
+                    [sc1] = mogSorter2(Waveforms',m,bestModel,mogopt);
+                    sortcodes = uint8(NasOnMog(sc,sc1));
+                    String = {'Sort - MoG sort'};
+                    UserData = {'mogsort' {[]}};
+                    Value = 1;
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch(j))),'sortcodes','String','UserData','Value','bestModel','gamma','m','-append');
+                    dispMsg = sprintf('Channel %i has just been loaded and sorted with MoG and neural net sort',ch(j));
+                catch
+                    String = [];
+                    UserData = [];
+                    Value = 0;
+                    bestModel = nan;
+                    m = [];
+                    gamma = nan;
+                    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ch(j))),'String','UserData','Value','bestModel','gamma','m','-append');
+                    dispMsg = sprintf('Channel %i can not be sorted by neural net sort\n',ch(j));
+                end
+            end
+        elseif Sparse == 2
+            PacketNumbers = [];
+            for i=1:length(FileInfo)
+                nums = find(FileInfo(i).maskedPacketOrder ==ch(j));
+                PacketNumbers = [PacketNumbers; ones(length(nums),1)*i nums]; %#ok<*AGROW>
+            end
+            
+            Waveforms = [];
+            Unit = [];
+            Times = [];
+            Breaks = zeros(length(FileInfo),1);
+            
+            for i = find(cellfun(@ismember,repmat({ch(j)},size(FileInfo)),{FileInfo.ActiveChannels}))
+                PN = PacketNumbers(PacketNumbers(:,1)==i,2);
+                loc = FileInfo(i).HeaderSize + FileInfo(i).Locations(PN);
+                
+                [wav,tim,uni] = readWaveforms2(loc,WaveformInfo.NumSamples,FileInfo(i).filename);
+                wav = int16(double(wav) / 1000 * FileInfo(i).nVperBit(ch(j)));
+                
+                Waveforms = [Waveforms; wav'];
+                
+                newTimes = double(tim)/FileInfo(i).TimeResolutionTimeStamps*1000;
+                
+                if i < length(FileInfo)
+                    if isempty(newTimes)
+                        Breaks(i+1) = Breaks(i);
+                    else
+                        Breaks(i+1) = Breaks(i)+max(newTimes);
+                    end
+                end
+                
+                newTimes = newTimes + Breaks(i);
+                
+                Times = [Times; newTimes];
+                Unit = [Unit; uni];
+                
+                FileInfo(i).units{ch(j)} = zeros(256,1);
+                FileInfo(i).units{ch(j)}(unique(double(Unit))+1) = 1;
+            end
+            save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ch(j))),'Waveforms','Times','Unit','Breaks','Sparse','nSpikesToRead');
+            dispMsg = sprintf('Channel %i has just been loaded',ch(j));
+        end
+    else
+        dispMsg = sprintf('Channel %i does not exist',ch(j));
+    end
+    disp(dispMsg);
+end
+disp('Reading finished!');
 
 function showfiles(~,~)
 global FileInfo
@@ -1100,13 +1456,13 @@ function closefiles(~,~)
 global WaveformInfo FileInfo Handles
 set(gcf,'pointer','watch');
 nSpikesToReadPerChannel = str2double(get(Handles.readSize,'String'));
+set(findobj(gcf,'tag','enableOnLoad'),'enable','off');
 manageTempFiles;
 for h = 1:length(FileInfo)
     FileInfo(h).nSpikesToReadPerChannel = nSpikesToReadPerChannel;
 end
 initializeGui;
 WaveformInfo.ChannelNumber = 0;
-set(findobj(gcf,'tag','enableOnLoad'),'enable','off');
 %initialize FileInfo structure
 FileInfo=struct('filename',[],'format','nev','HeaderSize',0,...
     'PacketSize',0,'ActiveChannels',[],'PacketOrder',uint8([]),...
@@ -1158,7 +1514,13 @@ switch lower(button)
                 String = [];
                 UserData = [];
                 Value = 0;
-                save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(i))),'UserData','String','Value','filenames','-append');
+                bestModel = nan;
+                m = [];
+                gamma = nan;
+                nClusters = nan;
+                ComponentLoadings = [];
+                me = [];
+                save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ActiveChannelList(i))),'UserData','String','Value','bestModel','gamma','m','nClusters','ComponentLoadings','me''-append');
             end
         end
         set(findobj('tag','noRedraw'),'userdata',false);
@@ -1188,10 +1550,14 @@ spikesort_gui('drawpca');
 
 function findAndLoadTempSort
 global WaveformInfo FileInfo Handles
-global TempTag;
+global TempTag ssDat;
 TempTag = false;
 if isempty(FileInfo(1).filename), return; end %do nothing if there is no NEV file loaded
-currentNevSet = {FileInfo.filename};
+currentNevSet = {};
+for i = 1:length(FileInfo)
+    [~,name,ext] = fileparts(FileInfo(i).filename);
+    currentNevSet{i} = [name,ext];
+end
 d = dir([WaveformInfo.sortFileLocation,filesep,'tempsort*']);
 
 if isempty(d), return; end %don't do anything if there are no temp files at all
@@ -1204,21 +1570,37 @@ matchFiles = false(size(tempSortFiles));
 for tsf = 1:numel(tempSortFiles)
     load(tempSortFiles{tsf},'fileSet');
     [Lia1,Locb1] = ismember(fileSet,currentNevSet);
-    [Lia2,Locb2] = ismember(currentNevSet,fileSet);    
+    [Lia2,Locb2] = ismember(currentNevSet,fileSet);
     matchFiles(tsf) = all(Lia1)&&all(Lia2)&&all(Locb1 == 1:size(Lia1,2))&&all(Locb2 == 1:size(Lia2,2)); %it's a match
 end
 %add load temp file choice
 tempSort = tempSortFiles(matchFiles);
 tempDate = tempSortDate(matchFiles);
+
 if sum(matchFiles) == 1
-    tempNote = sprintf('A temporary sort file dated %s was found\n',tempDate{1});
-    tempChoice = questdlg(tempNote,'Load temporary sort file','Load Temporary Sort',...
-        'Load NEV','Load NEV And Delete Old Sorts','Load Temporary Sort');
+    if ssDat.writeOnly
+        tempChoice = 'Load Temporary Sort';
+        ssDat.writeOnlyValid = true;
+    else
+        tempNote = sprintf('A temporary sort file dated %s was found\n',tempDate{1});
+        tempChoice = questdlg(tempNote,'Load temporary sort file','Load Temporary Sort',...
+            'Load NEV','Load NEV And Delete Old Sorts','Load Temporary Sort');
+    end
 elseif sum(matchFiles) > 1
-    tempNote = sprintf('%d temporary sort files were found\n',sum(matchFiles));
-    tempChoice = questdlg(tempNote,'Load temporary sort file','Choose Temporary Sort',...
-        'Load NEV','Load NEV And Delete Old Sorts','Choose Temporary Sort');
+    if ssDat.writeOnly
+        fprintf('Writing is canceled,because %d temporary sort files exist!\n',sum(matchFiles));
+        ssDat.writeOnlyValid = false;
+        return;
+    else
+        tempNote = sprintf('%d temporary sort files were found\n',sum(matchFiles));
+        tempChoice = questdlg(tempNote,'Load temporary sort file','Choose Temporary Sort',...
+            'Load NEV','Load NEV And Delete Old Sorts','Choose Temporary Sort');
+    end
 else
+    if ssDat.writeOnly
+        ssDat.writeOnlyValid = false;
+    end
+    fprintf('No match temporary file\n');
     return; % no match temp file
 end
 
@@ -1254,9 +1636,9 @@ if isnan(maxMV) && isnan(minMV)
     maxMV = mean(abs(get(Handles.plotHandle,'ylim')));
     minMV = -mean(abs(get(Handles.plotHandle,'ylim')));
 elseif isnan(maxMV) && ~isnan(minMV)
-       maxMV = mean(abs(get(Handles.plotHandle,'ylim')));
+    maxMV = mean(abs(get(Handles.plotHandle,'ylim')));
 elseif ~isnan(maxMV) && isnan(minMV)
-       minMV = -mean(abs(get(Handles.plotHandle,'ylim')));
+    minMV = -mean(abs(get(Handles.plotHandle,'ylim')));
 end
 switch get(src,'accelerator')
     case '=' %zoom in
@@ -1308,7 +1690,7 @@ switch answer
         [netName,path] = uigetfile('*.*','Select a Neural Net');
         if isequal(netName,0)
             return;
-        end       
+        end
         if exist(fullfile(path,strcat(netName(1:end-2),'w1')),'file') && ...
                 exist(fullfile(path,strcat(netName(1:end-2),'w2')),'file') && ...
                 exist(fullfile(path,strcat(netName(1:end-2),'b1')),'file') && ...
@@ -1320,30 +1702,3 @@ switch answer
     otherwise
         return;
 end
-
-          
-        
-       
-            
-        
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
