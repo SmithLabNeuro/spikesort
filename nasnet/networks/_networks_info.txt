@@ -1,0 +1,9 @@
+-- uStimNet --
+network trained on one session of hand sorted data, which had labels for spikes, noise and microstimulation artifacts.
+The network is trained to allocate waveforms to two classes 
+class1 = spikes, class2 = noise+ustim artifacts
+
+-- uStimNet_artifact --
+network trained on one session of hand sorted data, which had labels for spikes, noise and microstimulation artifacts.
+The network is trained to allocate waveforms to two classes 
+class1 = uStim artifacts, class2 = spikes+noise
