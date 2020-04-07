@@ -24,7 +24,7 @@ clear global WaveformInfo
 global WaveformInfo;
 
 if nargin<2||isempty(nWaveforms)
-    nWaveforms = 5e5;
+    nWaveforms = 5e4;
 end
 
 switch class(nWaveforms)
