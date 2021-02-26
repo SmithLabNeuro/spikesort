@@ -1,5 +1,5 @@
-function [spike, waves] = read_nev(nevfile)
-%function [spike, waves] = read_nev(nevfile)
+function [spike, waves] = read_nev(nevfile,varargin)
+%function [spike, waves] = read_nev(nevfile,varargin)
 %
 % read_nev takes an NEV file as input and returns the event codes
 % and times. 
@@ -12,6 +12,12 @@ function [spike, waves] = read_nev(nevfile)
 % If "waves" are requested, the waveforms associated with each
 % spike are returned as well
 %
+% Optional arguments
+% 'waveFormat' - 'uvolt' (default) or 'uvoltint' (int16, smaller) or
+%      'rawint' (also int16, but not converted to uvolts)
+% 'channels' - read all is default, or if a number list is specified only
+%      those will be read
+%
 
 if (nargout > 1)
     waveson = true;
@@ -19,13 +25,20 @@ else
     waveson = false;
 end
 
-if nargin < 2
+% optional input arguments
+p = inputParser;
+p.addOptional('channels',[],@isnumeric);
+p.addOptional('waveFormat','uvolt',@ischar);
+p.parse(varargin{:});
+
+ch = p.Results.channels;
+waveFormat = p.Results.waveFormat;
+
+if isempty(ch)
     readAllChannels = true;
 else
     readAllChannels = false;
 end
-
-%assert(isnumeric(ch),'');
 
 disp('Reading NEV file - ');
 
@@ -156,11 +169,17 @@ while x == 0
         m = m + 1;
     else       
         if (waveson)
-            uvolt = double(nVperBit(electrode))*.001;
-            % convert to uV!!!!!
-% MATT 20180731 - this is wrong, needs to be a double first
-%            waves{m} = typecast(tempData(9:datapacketsize),'int16').*uvolt;
-            waves{m} = double(typecast(tempData(9:datapacketsize),'int16')).*uvolt;
+            if strcmp(waveFormat,'uvolt')
+                uvolt = double(nVperBit(electrode))*.001;
+                waves{m} = double(typecast(tempData(9:datapacketsize),'int16')).*uvolt;
+            elseif strcmp(waveFormat,'rawint')
+                waves{m} = typecast(tempData(9:datapacketsize),'int16');
+            elseif strcmp(waveFormat,'uvoltint')
+                uvolt = double(nVperBit(electrode))*.001;
+                waves{m} = typecast(tempData(9:datapacketsize),'int16').*uvolt;
+            else
+                error('Invalid Wave Format');
+            end
         end
         
         % store the spike times and channels in spike array

@@ -6,6 +6,7 @@ function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
 % containing a variable named 'waveforms'
 %
 %INPUTS:
+%       datapath- string containing the path to filename
 %       filename- string filename of a .nev file OR a .mat file.
 %                 IF it's a .mat file, MUST include a variable called
 %                 "waveforms", waveforms is an Nx52 array, where N is the
@@ -14,9 +15,11 @@ function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
 %       gamma- minimum P(spike) value for a waveform to be classified as a
 %              spike (between 0 and 1). If you want a more lenient sort 
 %              (i.e. allows for more noise), then choose a smaller gamma.
-%       net_name- string of network name. All four NASNet output
-%                files must be available and saved as the network name
-%                followed by _w_hidden, _w_output, _b_hidden, _b_output.
+%       net_name- string of network name (eg. 'UberNet_N50_L1'). 
+%                Different networks are stored in the folder '../networks'
+%                All four NASNet output files must be available and saved 
+%                as the network name followed by _w_hidden, _w_output, 
+%                _b_hidden, _b_output.
 %
 %OUTPUTS:
 %       slabel- list of labels for each waveform (0 for noise, 1 for spike)
@@ -43,6 +46,7 @@ function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
 % (see Trellis NEV Spec manual)
 maxspikech = 512;
 
+addpath(genpath('../../'))
 % optional input arguments
 p = inputParser;
 p.addOptional('channels',[],@isnumeric);
@@ -53,12 +57,12 @@ ch          = p.Results.channels;
 writelabels = p.Results.writelabels;
 
 %% load trained network
-
+cd ../
 try
-    w1 = load(strcat(net_name,'_w_hidden'));
-    b1 = load(strcat(net_name,'_b_hidden'));
-    w2 = load(strcat(net_name,'_w_output'));
-    b2 = load(strcat(net_name,'_b_output'));
+    w1 = load(strcat('networks/',net_name,'_w_hidden'));
+    b1 = load(strcat('networks/',net_name,'_b_hidden'));
+    w2 = load(strcat('networks/',net_name,'_w_output'));
+    b2 = load(strcat('networks/',net_name,'_b_output'));
 catch
     error('The network you named does not exist or the files were not named appropriately.')
 end
@@ -68,6 +72,7 @@ end
 [~,~,ext] = fileparts(filename);
 spikes = [];
 
+% cd(datapath)
 switch ext
     case '.nev'
         [spikes,waves] = read_nev(filename,'channels',ch);

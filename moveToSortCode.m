@@ -1,5 +1,5 @@
-function moveToSortCode(nevfile, spikeidx, sortcode)
-%function moveToSortCode(nevfile, spikeidx, sortcode)
+function moveToSortCode(nevfile, spikeidx, sortcode, varargin)
+%function moveToSortCode(nevfile, spikeidx, sortcode, varargin)
 %
 % Takes a nev file, a list of logicals, and a sort code. All events where
 % the logical list (spikeidx) is true should be moved to 'sortcode'
@@ -13,15 +13,49 @@ function moveToSortCode(nevfile, spikeidx, sortcode)
 % what should be done with each spike, and this function will write
 % the appropriate sort code for those spikes into the file.
 %
+% Optional arguments
+% 'channels' - write all is default, or if a number list is specified only
+%      those will be written
+
+%
+% 02/2020: -Added channel selection functionality, as in read_nev
+%          -Added clause to forbid overwritting digital codes (channel 0)
+%           and uStim events (channels>512) to nev files.
+
+%%
+% 512 is the highest available number of spike channels 
+% (see Trellis NEV Spec manual)
+maxspikech = 512;
 
 disp('Moving Sort Codes ...');
 
+% optional input arguments
+p = inputParser;
+p.addOptional('channels',[],@isnumeric);
+p.parse(varargin{:});
+
+ch = p.Results.channels;
+
+if isempty(ch)
+    readAllChannels = true;
+else
+    readAllChannels = false;
+    assert(~ismember(0,ch), ...
+    'channel list cannot include 0, this channel represents digital events and should not be modified');
+    assert(isempty(find(ch>=maxspikech,1)), ...
+    ['channel list contains invalid channels. The highest available number of spike channels is ' num2str(maxspikech)]);
+end
+
+spikenum = numel(spikeidx);
+
+% do some checks
 assert(unique(ismember(sortcode,0:255)),'Sort Code must be 0 to 255');
-assert(numel(sortcode)==1 || numel(sortcode)==numel(spikeidx),['Must specify a single value for Sort Code or specify a sort code for each spike']);
+assert(numel(sortcode)==1 || numel(sortcode)==spikenum, ...
+'Must specify a single value for Sort Code or specify a sort code for each spike');
 
 % if only one sort code was provided, use it for all spikes
 if numel(sortcode)==1
-    sortcode = sortcode .* ones(numel(spikeidx),1);
+    sortcode = sortcode .* ones(spikenum,1);
 end
 
 %Header Basic Information
@@ -101,18 +135,26 @@ fseek(fid,headersize,0); % skip over header
 %Data Packets
 %---------------------
 %indexing
-m = 0;
+m = 0; % all packets in size
+n = 0; % selected packets according to channel list and/or spikeidx list
 
 ninc = 10;
 increment = mb*ninc; % ninc megabytes
 nextthresh = increment;
 
+fprintf('Checking that the # of packets in file matches input value spikeidx length...\n')
 while true
     
     [tempData,c] = fread(fid,datapacketsize,'uint8=>uint8');
-    if c == 0; %disp('Finished reading file');
+    if c == 0 %disp('Finished reading file');
         break; end
     m = m + 1;
+    
+    electrode = typecast(tempData(5:6),'uint16');    
+    
+    if readAllChannels == true || ismember(electrode,ch)
+        n = n+1;
+    end
     
     % could assert here to double-check the file is reasonable
     %    if (0)
@@ -132,7 +174,7 @@ while true
 %    else
 %        fseek(fid,(datapacketsize-8),0); % seek past waveform info
 %    end
-    
+
     if ftell(fid) > nextthresh
         fprintf('Reading File Position: %i of %0.2f MB\n',(nextthresh/increment)*ninc,fsize);
         nextthresh = nextthresh + increment;
@@ -144,7 +186,9 @@ fclose(fid);
 assert(nPacketsInFile==m,'Projected packets does not match measured packets');
 
 % There must be a match between the packets in the file and the input list
-assert(numel(spikeidx)==m,'# of packets in file does not match input value spikeidx'); 
+assert(spikenum==n,'# of packets in file does not match input value spikeidx length'); 
+
+fprintf('All good!\n')
 
 %-------------------------------------------------------------------------------
 %Write Sort Codes
@@ -154,14 +198,15 @@ fseek(fid,headersize,0); % skip over header
 %Data Packets
 %---------------------
 %indexing
-m = 0;
+n = 0;
+s = 0; %spike index
 x = 0;
 nextthresh = increment;
 
+disp('Writing sortcodes to file...')
 while x == 0
     [~,c] = fread(fid,1,'ulong');
     if c == 0, x=1; disp('Finished writing file'); break; end
-    m = m + 1;
     
     electrode = fread(fid,1,'int16');
 
@@ -171,25 +216,43 @@ while x == 0
     % Or this might be OK?
     %fseek(fid,0,0);
     
-    if spikeidx(m)==true
-        fwrite(fid,sortcode(m),'uint8');
-        fseek(fid,1,0); % seek past 'future' value
+    if readAllChannels == true || ismember(electrode,ch)
+        n = n+1;
+        if (electrode == 0) || (electrode >= maxspikech) 
+            % do nothing to digital codes or to non-spike channels
+            % move reading position two units
+            fseek(fid,2,0);
+        else
+            s = s+1;
+            if spikeidx(n)==true
+                fwrite(fid,sortcode(n),'uint8');
+                fseek(fid,1,0); % seek past 'future' value
+            else
+                fseek(fid,2,0);
+            end
+        end
     else
         fseek(fid,2,0);
     end
+    
+    % seek past the rest of the packet (where waveform is)    
+    fseek(fid,(datapacketsize-8),0);
     
 %     if electrode == 0 %signals experimental information
 %         fseek(fid,(datapacketsize-8),0);
 %     else
 %         fseek(fid,(datapacketsize-8),0); % seek past waveform info
 %     end
-     
-    fseek(fid,(datapacketsize-8),0); % seek past the rest of the packet (where waveform is)
     
     if ftell(fid) > nextthresh
         fprintf('Writing File Position: %i of %0.2f MB\n',(nextthresh/increment)*ninc,fsize);
         nextthresh = nextthresh + increment;
     end
+    
+    if s>=spikenum
+        x=1;
+    end 
+    
 end %while loop
 
 fclose(fid);
