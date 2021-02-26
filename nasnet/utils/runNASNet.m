@@ -1,5 +1,5 @@
 
-function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
+function [slabel,spikes] = runNASNet(filename,gamma,varargin)
 %
 % This script classifies waveforms using a trained neural network
 % (see Issar et al (2020)). The file can either be an NEV or a .mat file 
@@ -15,11 +15,6 @@ function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
 %       gamma- minimum P(spike) value for a waveform to be classified as a
 %              spike (between 0 and 1). If you want a more lenient sort 
 %              (i.e. allows for more noise), then choose a smaller gamma.
-%       net_name- string of network name (eg. 'UberNet_N50_L1'). 
-%                Different networks are stored in the folder '../networks'
-%                All four NASNet output files must be available and saved 
-%                as the network name followed by _w_hidden, _w_output, 
-%                _b_hidden, _b_output.
 %
 %OUTPUTS:
 %       slabel- list of labels for each waveform (0 for noise, 1 for spike)
@@ -30,6 +25,11 @@ function [slabel,spikes] = runNASNet(filename,gamma,net_name,varargin)
 %              those will be read
 % 'writelabels' - false is default. If true, the classification labels will
 %                 be written as sort codes into the nev file
+% 'netname'     - string of network name (eg. 'UberNet_N50_L1', default). 
+%                Different networks are stored in the folder '../networks'
+%                All four NASNet output files must be available and saved 
+%                as the network name followed by _w_hidden, _w_output, 
+%                _b_hidden, _b_output.
 
 %NOTES:
 %****The number of samples in each waveform must match the number of
@@ -51,18 +51,20 @@ addpath(genpath('../../'))
 p = inputParser;
 p.addOptional('channels',[],@isnumeric);
 p.addOptional('writelabels',false,@islogical);
+p.addOptional('netname','UberNet_N50_L1',@ischar);
 p.parse(varargin{:});
 
 ch          = p.Results.channels;
 writelabels = p.Results.writelabels;
+netname     = p.Results.netname;
 
 %% load trained network
 cd ../
 try
-    w1 = load(strcat('networks/',net_name,'_w_hidden'));
-    b1 = load(strcat('networks/',net_name,'_b_hidden'));
-    w2 = load(strcat('networks/',net_name,'_w_output'));
-    b2 = load(strcat('networks/',net_name,'_b_output'));
+    w1 = load(strcat('networks/',netname,'_w_hidden'));
+    b1 = load(strcat('networks/',netname,'_b_hidden'));
+    w2 = load(strcat('networks/',netname,'_w_output'));
+    b2 = load(strcat('networks/',netname,'_b_output'));
 catch
     error('The network you named does not exist or the files were not named appropriately.')
 end
@@ -107,7 +109,7 @@ nend = 0;
 
 net_labels = zeros(1,nwaves);
 
-disp('applying neural net classifier...')
+disp(['applying neural net classifier ' netname])
 while nend~=nwaves
     nstart = 1 + counter*n_per_it;
     nend = nstart + n_per_it - 1;
