@@ -1,13 +1,13 @@
-
-function [slabel,spikes] = runNASNet(filename,gamma,varargin)
+function [slabel,spikes,net_labels] = runNASNet(filenameOrNev,gamma,varargin)
 %
 % This script classifies waveforms using a trained neural network
 % (see Issar et al (2020)). The file can either be an NEV or a .mat file 
 % containing a variable named 'waveforms'
 %
 %INPUTS:
-%       datapath- string containing the path to filename
-%       filename- string filename of a .nev file OR a .mat file.
+%       filenameOrNev- string filename of a .nev file OR a .mat file OR a
+%           cell array containing the Nx3 nev data at the first index and
+%           the Nx52 waveforms in the second index.
 %                 IF it's a .mat file, MUST include a variable called
 %                 "waveforms", waveforms is an Nx52 array, where N is the
 %                 number of waveforms, and 52 is the number of samples in
@@ -21,15 +21,21 @@ function [slabel,spikes] = runNASNet(filename,gamma,varargin)
 %       spikes- waveform information (channel, sortcode, time)
 %
 % OPTIONAL ARGUMENTS:
-% 'channels' - read all is default, or if a number list is specified only
-%              those will be read
+% 'channels'    - read all is default, or if a number list is specified 
+%                 only those will be read
 % 'writelabels' - false is default. If true, the classification labels will
 %                 be written as sort codes into the nev file
 % 'netname'     - string of network name (eg. 'UberNet_N50_L1', default). 
-%                Different networks are stored in the folder '../networks'
-%                All four NASNet output files must be available and saved 
-%                as the network name followed by _w_hidden, _w_output, 
-%                _b_hidden, _b_output.
+%                 Different networks are stored in the folder netFolder
+%                 (defined below). All four NASNet output files must be
+%                 available and saved as the network name followed by
+%                 _w_hidden, _w_output, _b_hidden, _b_output.
+% 'netFolder'   - string of the folder where the network is stored; can be
+%                 an absolute or relative path. DEFAULT: '../networks'
+% 'labelSpikesAsWithWrite' - controls whether spikes output has labels 0/1
+%               for bad/good waveforms (DEFAULT), or whether it outputs
+%               255/0 for bad/good waveforms, as happens when the NEV is
+%               rewritten (if 'writelabels' is true)
 
 %NOTES:
 %****The number of samples in each waveform must match the number of
@@ -46,25 +52,29 @@ function [slabel,spikes] = runNASNet(filename,gamma,varargin)
 % (see Trellis NEV Spec manual)
 maxspikech = 512;
 
-addpath(genpath('../../'))
+% addpath(genpath('../../'))
 % optional input arguments
 p = inputParser;
 p.addOptional('channels',[],@isnumeric);
 p.addOptional('writelabels',false,@islogical);
 p.addOptional('netname','UberNet_N50_L1',@ischar);
+p.addOptional('netFolder','../networks',@ischar);
+p.addOptional('labelSpikesAsWithWrite', false, @islogical);
 p.parse(varargin{:});
 
 ch          = p.Results.channels;
 writelabels = p.Results.writelabels;
 netname     = p.Results.netname;
+netFolder     = p.Results.netFolder;
+labelSpikesAsWithWrite = p.Results.labelSpikesAsWithWrite;
 
 %% load trained network
-cd ../
+% cd ../
 try
-    w1 = load(strcat('networks/',netname,'_w_hidden'));
-    b1 = load(strcat('networks/',netname,'_b_hidden'));
-    w2 = load(strcat('networks/',netname,'_w_output'));
-    b2 = load(strcat('networks/',netname,'_b_output'));
+    w1 = load(fullfile(netFolder,[netname,'_w_hidden']));
+    b1 = load(fullfile(netFolder,[netname,'_b_hidden']));
+    w2 = load(fullfile(netFolder,[netname,'_w_output']));
+    b2 = load(fullfile(netFolder,[netname,'_b_output']));
 catch
     error('The network you named does not exist or the files were not named appropriately.')
 end
@@ -102,7 +112,7 @@ end
 if size(waveforms,2)~=size(w1,1), error(['This network can only classify waveforms that are ' num2str(size(w1,1)),' samples long']); end
 
 %% classify waveforms
-nwaves = length(waveforms);
+nwaves = size(waveforms,1);
 n_per_it = 1000; %number of waves per iteration
 counter = 0;
 nend = 0;
@@ -166,7 +176,7 @@ if strcmp(ext,'.nev') && writelabels
     spikesidx(spikes(:,1)>maxspikech) = 0;
     sortcodes(spikes(:,1)>maxspikech) = 0;
     
-    moveToSortCode(filename,spikesidx,sortcodes,'channels',ch);
+    moveToSortCode(filenameOrNev,spikesidx,sortcodes,'channels',ch);
 
 end
 
