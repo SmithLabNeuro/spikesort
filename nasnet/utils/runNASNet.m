@@ -81,31 +81,49 @@ end
 
 %% load file to classify
 
-[~,~,ext] = fileparts(filename);
-spikes = [];
-
-% cd(datapath)
-switch ext
-    case '.nev'
-        [spikes,waves] = read_nev(filename,'channels',ch);
-        
-        if any(spikes(:,1)==0)
-            %These are digital codes. There are no waveforms to classify for
-            %these indices so create placeholder in waveform list so indexing works
-            %for moveToSortCode.
-            waves(spikes(:,1)==0) = {ones(52,1,'int16')};
-        end
-        
-        waveforms = [waves{:}]'; %convert from a cell to an array
-        clear waves;
-        
-    case '.mat'
-        disp('loading data...')
-        load(filename);
-        if ~exist('waveforms'), error('waveforms must be stored in a variable named "waveforms".'); end
-        
-    otherwise
-        error('file must be a .nev or Nx52 .mat');
+if ischar(filenameOrNev)
+    [~,~,ext] = fileparts(filenameOrNev);
+    
+    % cd(datapath)
+    switch ext
+        case '.nev'
+            if exist('readNEV', 3)
+                [spikes,waves] = readNEV(filenameOrNev,'channels',ch);
+                waveforms = waves';
+            else
+                % if readNEV not on path, use slower read_nev in repository
+                addpath(genpath('../../'))
+                [spikes,waves] = read_nev(filenameOrNev,'channels',ch);
+                % this is necessary because read_nev outputs waves as a
+                % cell array of waves, and the cell is empty if it's not
+                % associated with a spike
+                if any(spikes(:,1)==0)
+                    %These are digital codes. There are no waveforms to classify for
+                    %these indices so create placeholder in waveform list so indexing works
+                    %for moveToSortCode.
+                    waves(:, spikes(:,1)==0) = ones(52,1,'int16');
+                end
+                waveforms = [waves{:}]'; % convert from a cell to an array
+            end
+            
+            clear waves;
+            
+        case '.mat'
+            disp('loading data...')
+            load(filenameOrNev);
+            if ~exist('waveforms'), error('waveforms must be stored in a variable named "waveforms".'); end
+            
+        otherwise
+            error('file must be a .nev or Nx52 .mat');
+    end
+elseif iscell(filenameOrNev)
+    preloadedNev = filenameOrNev;
+    spikes = preloadedNev{1};
+    waves = preloadedNev{2};
+    waveforms = waves';
+    clear waves;
+else
+    error('input must be a .nev or Nx52 .mat or a cell with spikes and waves preloaded');
 end
 
 %check that the waveform size is appropriate for the network
@@ -154,10 +172,14 @@ end
 slabel = zeros(size(net_labels)); %spike classification
 slabel(net_labels>=gamma) = 1;
 
-spikes(:,2) = slabel;
+if labelSpikesAsWithWrite
+    spikes(spikes(:,1)~=0,2) = slabel(spikes(:,1)~=0) + ~slabel(spikes(:,1)~=0)*255;
+else
+    spikes(:,2) = slabel;
+end
 
 %If applicable, modify NEV file
-if strcmp(ext,'.nev') && writelabels
+if writelabels && strcmp(ext,'.nev')
 
     % spikes and noise labels
     
