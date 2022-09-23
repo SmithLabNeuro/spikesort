@@ -175,7 +175,7 @@ slabel(net_labels>=gamma) = 1;
 if labelSpikesAsWithWrite
     spikes(spikes(:,1)~=0,2) = slabel(spikes(:,1)~=0) + ~slabel(spikes(:,1)~=0)*255;
 else
-    spikes(:,2) = slabel;
+    spikes(spikes(:,1)~=0,2) = slabel(spikes(:,1)~=0);
 end
 
 %If applicable, modify NEV file
