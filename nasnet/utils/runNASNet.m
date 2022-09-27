@@ -34,7 +34,7 @@ function [slabel,spikes,net_labels] = runNASNet(filenameOrNev,gamma,varargin)
 %                 an absolute or relative path. DEFAULT: '../networks'
 % 'labelSpikesAsWithWrite' - controls whether spikes output has labels 0/1
 %               for bad/good waveforms (DEFAULT), or whether it outputs
-%               255/0 for bad/good waveforms, as happens when the NEV is
+%               255/1 for bad/good waveforms, as happens when the NEV is
 %               rewritten (if 'writelabels' is true)
 
 %NOTES:
@@ -87,7 +87,7 @@ if ischar(filenameOrNev)
     % cd(datapath)
     switch ext
         case '.nev'
-            if exist('readNEV', 3)
+            if exist('readNEV', 'file')
                 [spikes,waves] = readNEV(filenameOrNev,'channels',ch);
                 waveforms = waves';
             else
