@@ -87,11 +87,11 @@ if ischar(filenameOrNev)
     % cd(datapath)
     switch ext
         case '.nev'
-            if exist('readNEV', 'file')
-                [spikes,waves] = readNEV(filenameOrNev,'channels',ch);
+            if exist('readNEV', 'file') && isempty(ch) 
+                [spikes,waves] = readNEV(filenameOrNev);
                 waveforms = waves';
             else
-                % if readNEV not on path, use slower read_nev in repository
+                % if readNEV not on path or channels specified, use slower read_nev in repository
                 addpath(genpath('../../'))
                 [spikes,waves] = read_nev(filenameOrNev,'channels',ch);
                 % this is necessary because read_nev outputs waves as a
@@ -101,7 +101,7 @@ if ischar(filenameOrNev)
                     %These are digital codes. There are no waveforms to classify for
                     %these indices so create placeholder in waveform list so indexing works
                     %for moveToSortCode.
-                    waves(:, spikes(:,1)==0) = ones(52,1,'int16');
+                    waves(spikes(:,1)==0) = {ones(52,1)};
                 end
                 waveforms = [waves{:}]'; % convert from a cell to an array
             end
