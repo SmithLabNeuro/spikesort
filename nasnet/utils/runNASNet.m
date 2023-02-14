@@ -36,6 +36,8 @@ function [slabel,spikes,net_labels] = runNASNet(filenameOrNev,gamma,varargin)
 %               for bad/good waveforms (DEFAULT), or whether it outputs
 %               255/1 for bad/good waveforms, as happens when the NEV is
 %               rewritten (if 'writelabels' is true)
+%  'uvoltint' - true or false to use uvoltint waveformat flag in read_nev.
+%               Using int conversion saves memory but is a little bit lossy.
 
 %NOTES:
 %****The number of samples in each waveform must match the number of
@@ -60,6 +62,7 @@ p.addOptional('writelabels',false,@islogical);
 p.addOptional('netname','UberNet_N50_L1',@ischar);
 p.addOptional('netFolder','../networks',@ischar);
 p.addOptional('labelSpikesAsWithWrite', false, @islogical);
+p.addOptional('uvoltint', false, @islogical);
 p.parse(varargin{:});
 
 ch          = p.Results.channels;
@@ -67,6 +70,7 @@ writelabels = p.Results.writelabels;
 netname     = p.Results.netname;
 netFolder     = p.Results.netFolder;
 labelSpikesAsWithWrite = p.Results.labelSpikesAsWithWrite;
+uvoltintFlag = p.Results.uvoltint;
 
 %% load trained network
 % cd ../
@@ -87,13 +91,17 @@ if ischar(filenameOrNev)
     % cd(datapath)
     switch ext
         case '.nev'
-            if exist('readNEV', 'file') && isempty(ch) 
+            if exist('readNEV', 'file') && isempty(ch) && ~uvoltintFlag
                 [spikes,waveforms] = readNEV(filenameOrNev);
                 waveforms = waveforms';
             else
                 % if readNEV not on path or channels specified, use slower read_nev in repository
                 addpath(genpath('../../'))
-                [spikes,waveforms] = read_nev(filenameOrNev,'channels',ch);
+                if uvoltintFlag
+                    [spikes,waveforms] = read_nev(filenameOrNev,'channels',ch,'waveFormat','uvoltint');
+                else
+                    [spikes,waveforms] = read_nev(filenameOrNev,'channels',ch,'waveFormat','uvolt');
+                end
                 % this is necessary because read_nev outputs waves as a
                 % cell array of waves, and the cell is empty if it's not
                 % associated with a spike
