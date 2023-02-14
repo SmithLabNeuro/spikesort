@@ -83,17 +83,17 @@ end
 
 if ischar(filenameOrNev)
     [~,~,ext] = fileparts(filenameOrNev);
-    
+
     % cd(datapath)
     switch ext
         case '.nev'
             if exist('readNEV', 'file') && isempty(ch) 
-                [spikes,waves] = readNEV(filenameOrNev);
-                waveforms = waves';
+                [spikes,waveforms] = readNEV(filenameOrNev);
+                waveforms = waveforms';
             else
                 % if readNEV not on path or channels specified, use slower read_nev in repository
                 addpath(genpath('../../'))
-                [spikes,waves] = read_nev(filenameOrNev,'channels',ch);
+                [spikes,waveforms] = read_nev(filenameOrNev,'channels',ch);
                 % this is necessary because read_nev outputs waves as a
                 % cell array of waves, and the cell is empty if it's not
                 % associated with a spike
@@ -101,27 +101,26 @@ if ischar(filenameOrNev)
                     %These are digital codes. There are no waveforms to classify for
                     %these indices so create placeholder in waveform list so indexing works
                     %for moveToSortCode.
-                    waves(spikes(:,1)==0) = {ones(52,1)};
+                    waveforms(spikes(:,1)==0) = {ones(52,1)};
                 end
-                waveforms = [waves{:}]'; % convert from a cell to an array
+                waveforms = [waveforms{:}]'; % convert from a cell to an array
             end
             
-            clear waves;
             
         case '.mat'
+            if writelabels, error('can only write labels to nev if a .nev filename was passed.'); end
             disp('loading data...')
             load(filenameOrNev);
             if ~exist('waveforms'), error('waveforms must be stored in a variable named "waveforms".'); end
-            
+            clear filenameOrNev;
         otherwise
             error('file must be a .nev or Nx52 .mat');
     end
 elseif iscell(filenameOrNev)
-    preloadedNev = filenameOrNev;
-    spikes = preloadedNev{1};
-    waves = preloadedNev{2};
-    waveforms = waves';
-    clear waves;
+    if writelabels, error('can only write labels to nev if a .nev filename was passed.'); end
+    spikes = filenameOrNev{1};
+    waveforms = filenameOrNev{2}';
+    clear filenameOrNev;
 else
     error('input must be a .nev or Nx52 .mat or a cell with spikes and waves preloaded');
 end
