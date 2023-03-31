@@ -927,6 +927,7 @@ else
     WaveformInfo.ComponentLoadings = ComponentLoadings;
     WaveformInfo.Comp = centeredWaves*WaveformInfo.ComponentLoadings;
 end
+
 resetWaveformBounds();
 
 function loadWaveforms(ChannelNumber)
@@ -948,12 +949,11 @@ WaveformInfo.Align = zeros(size(WaveformInfo.Waveforms,1),1);
 WaveformInfo.selected = [];
 
 load(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'ComponentLoadings','me');
-
 if isempty(ComponentLoadings) || Sparse == 1
     [WaveformInfo.ComponentLoadings,WaveformInfo.Comp] = pca(double(WaveformInfo.Waveforms));
     ComponentLoadings = WaveformInfo.ComponentLoadings;
     me = mean(WaveformInfo.Waveforms);
-    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/ch%i.mat',ChannelNumber)),'ComponentLoadings','me','-append');
+    save(fullfile(WaveformInfo.sortFileLocation,sprintf('spikesortunits/hist%i.mat',ChannelNumber)),'ComponentLoadings','me','-append');
 else
     centeredWaves = bsxfun(@minus,double(WaveformInfo.Waveforms),me);
     WaveformInfo.ComponentLoadings = ComponentLoadings;
