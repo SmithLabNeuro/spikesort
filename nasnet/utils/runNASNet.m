@@ -1,4 +1,4 @@
-function [slabel,spikes,net_labels] = runNASNet(filenameOrNev,gamma,varargin)
+function [slabel,spikes,net_labels,waveforms] = runNASNet(filenameOrNev,gamma,varargin)
 %
 % This script classifies waveforms using a trained neural network
 % (see Issar et al (2020)). The file can either be an NEV or a .mat file 
@@ -38,6 +38,7 @@ function [slabel,spikes,net_labels] = runNASNet(filenameOrNev,gamma,varargin)
 %               rewritten (if 'writelabels' is true)
 %  'uvoltint' - true or false to use uvoltint waveformat flag in read_nev.
 %               Using int conversion saves memory but is a little bit lossy.
+% 'int16Flag' - true or false to use int16 option in readNEV
 
 %NOTES:
 %****The number of samples in each waveform must match the number of
@@ -63,6 +64,7 @@ p.addOptional('netname','UberNet_N50_L1',@ischar);
 p.addOptional('netFolder','../networks',@ischar);
 p.addOptional('labelSpikesAsWithWrite', false, @islogical);
 p.addOptional('uvoltint', false, @islogical);
+p.addOptional('int16Flag',false,@islogical);
 p.parse(varargin{:});
 
 ch          = p.Results.channels;
@@ -71,6 +73,7 @@ netname     = p.Results.netname;
 netFolder     = p.Results.netFolder;
 labelSpikesAsWithWrite = p.Results.labelSpikesAsWithWrite;
 uvoltintFlag = p.Results.uvoltint;
+int16Flag = p.Results.int16Flag;
 
 %% load trained network
 % cd ../
@@ -92,7 +95,26 @@ if ischar(filenameOrNev)
     switch ext
         case '.nev'
             if exist('readNEV', 'file') && isempty(ch) && ~uvoltintFlag
-                [spikes,waveforms] = readNEV(filenameOrNev);
+                if int16Flag
+                    % read in full NEV as int16 (size in matlab is similar to the NEV file size, helps with large files)
+                    [spikes,waveforms] = readNEV(filenameOrNev,1); %int16
+
+                    % create a list of uVoltPerBit for every waveform
+                    wavechan = spikes(:,1);
+                    chanlist = unique(wavechan);
+                    uVoltPerBit = zeros(size(wavechan));
+                    hdr = NEV_displayheader(filenameOrNev);
+                    chanIdentifier = {hdr.ExtHeader(:).Identifier};
+                    ExtHeader = hdr.ExtHeader(strcmp(chanIdentifier,'NEUEVWAV'));
+                    for eh = 1:length(ExtHeader)
+                        elecID = [ExtHeader(eh).ElecID];
+                        if ismember(elecID,chanlist)
+                            uVoltPerBit(wavechan==elecID) = double(ExtHeader(eh).nVperBit)./1000;
+                        end
+                    end
+                else
+                    [spikes,waveforms] = readNEV(filenameOrNev);
+                end
                 waveforms = waveforms';
             else
                 % if readNEV not on path or channels specified, use slower read_nev in repository
@@ -156,8 +178,12 @@ while nend~=nwaves
     n_loop = length(nstart:nend);
     
     % generate classifications
-    wave_in = double(waveforms(nstart:nend,:));
-    
+    if int16Flag % if necessary convert waveforms to uvolt double
+        wave_in = double(waveforms(nstart:nend,:)).*uVoltPerBit(nstart:nend);
+    else
+        wave_in = double(waveforms(nstart:nend,:));
+    end
+
     %*****Layer 1******
     layer1_raw = wave_in*w1 + repmat(b1',n_loop,1);
     
@@ -173,6 +199,7 @@ while nend~=nwaves
     
     net_labels(nstart:nend) = layer2_out;
     counter = counter + 1;
+    clear wave_in;
 end
 
 %% assign waveforms spike/noise labels
