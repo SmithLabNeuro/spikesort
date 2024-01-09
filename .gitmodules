@@ -1,0 +1,3 @@
+[submodule "nasnet"]
+	path = nasnet
+	url = https://github.com/SmithLabNeuro/nasnet.git
